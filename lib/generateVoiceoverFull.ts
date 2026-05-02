@@ -1,0 +1,151 @@
+import OpenAI from 'openai';
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import type { VideoSettings } from '@/types';
+import { VOICE_PRESETS } from './voicePresets';
+import { GEMINI_TTS_PRESETS } from './geminiTtsPresets';
+
+const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+
+function probeAudioDuration(filepath: string): number | null {
+  try {
+    const out = execSync(
+      `ffprobe -v quiet -print_format json -show_format "${filepath}"`,
+      { encoding: 'utf8', timeout: 10_000 },
+    );
+    const json = JSON.parse(out) as { format?: { duration?: string } };
+    const d = parseFloat(json.format?.duration ?? '');
+    return isNaN(d) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generates a single voiceover MP3 for the entire script.
+ * Segments are joined with a double newline (natural pause in TTS).
+ *
+ * @param texts  Enhanced text for each segment, in order.
+ * @param jobId  Unique ID used as filename basis.
+ * @param settings  Video settings (TTS provider + voice config).
+ * @returns  Relative web path, absolute disk path, and total duration in seconds.
+ */
+export async function generateVoiceoverFull(
+  texts: string[],
+  jobId: string,
+  settings: VideoSettings,
+): Promise<{ audioRelPath: string; audioAbsPath: string; duration: number }> {
+  const dir = path.join(process.cwd(), 'public', 'tmp', 'audio');
+  fs.mkdirSync(dir, { recursive: true });
+
+  const filename = `voiceover_${jobId}.mp3`;
+  const absPath = path.join(dir, filename);
+  const relPath = `/tmp/audio/${filename}`;
+
+  // Join with double newline → natural pause between segments in TTS
+  const fullText = texts.join('\n\n');
+
+  if (settings.ttsProvider === 'gemini') {
+    await generateGeminiVoiceover(fullText, absPath, settings);
+  } else {
+    // openai or elevenlabs-fallback → use OpenAI
+    await generateOpenAIVoiceover(fullText, absPath, settings);
+  }
+
+  const measured = probeAudioDuration(absPath);
+  const fallback = Math.max(5, fullText.split(/\s+/).length / 2.5);
+  const duration = measured ?? fallback;
+
+  return { audioRelPath: relPath, audioAbsPath: absPath, duration };
+}
+
+// ── OpenAI TTS ──────────────────────────────────────────────────────────────
+async function generateOpenAIVoiceover(
+  text: string,
+  outputPath: string,
+  settings: VideoSettings,
+): Promise<void> {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const instructions =
+    settings.voicePreset === 'custom'
+      ? settings.customInstructions.trim()
+      : VOICE_PRESETS[settings.voicePreset].instructions;
+
+  const useInstructions = instructions.length > 0;
+
+  const params: Record<string, unknown> = {
+    model: useInstructions ? 'gpt-4o-mini-tts' : settings.hdQuality ? 'tts-1-hd' : 'tts-1',
+    voice: settings.voice,
+    input: text,
+    speed: Math.max(0.25, Math.min(4.0, settings.speed)),
+  };
+  if (useInstructions) params.instructions = instructions;
+
+  const mp3 = await openai.audio.speech.create(
+    params as unknown as Parameters<typeof openai.audio.speech.create>[0],
+  );
+  const buffer = Buffer.from(await mp3.arrayBuffer());
+  fs.writeFileSync(outputPath, buffer);
+}
+
+// ── Gemini TTS ──────────────────────────────────────────────────────────────
+async function generateGeminiVoiceover(
+  text: string,
+  outputPath: string,
+  settings: VideoSettings,
+): Promise<void> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
+
+  const dir = path.dirname(outputPath);
+  const base = path.basename(outputPath, '.mp3');
+  const pcmPath = path.join(dir, `${base}.pcm`);
+
+  const stylePrompt =
+    settings.geminiPreset === 'custom'
+      ? settings.geminiCustomPrompt.trim()
+      : GEMINI_TTS_PRESETS[settings.geminiPreset].prompt;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`;
+
+  const body: Record<string, unknown> = {
+    contents: [{ role: 'user', parts: [{ text }] }],
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: settings.geminiVoice },
+        },
+      },
+    },
+  };
+  if (stylePrompt) {
+    body.systemInstruction = { parts: [{ text: stylePrompt }] };
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini TTS error ${res.status}: ${err.slice(0, 300)}`);
+  }
+
+  const data = await res.json() as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ inlineData?: { data?: string } }> };
+    }>;
+  };
+
+  const b64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!b64) throw new Error('Gemini TTS returned no audio data');
+
+  fs.writeFileSync(pcmPath, Buffer.from(b64, 'base64'));
+  execSync(`ffmpeg -y -f s16le -ar 24000 -ac 1 -i "${pcmPath}" "${outputPath}"`, { timeout: 60_000 });
+  try { fs.unlinkSync(pcmPath); } catch { /* ignore */ }
+}

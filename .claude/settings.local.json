@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const fs=require\\('fs'\\); const f='/Users/tomasmarek21/GPTTOM/AI-Editor/public/tmp/images/6a70959e-4203-4941-8d2c-a987be56808d.jpg'; if\\(fs.existsSync\\(f\\)\\){const b=fs.readFileSync\\(f\\); console.log\\('size:', b.length, 'hex:', b.slice\\(0,8\\).toString\\('hex'\\)\\)} else {console.log\\('file missing'\\)}\")",
+      "Bash(npx tsc *)",
+      "Bash(node -e ' *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(xargs ls *)",
+      "Bash(awk '{print $9, $5}')",
+      "Bash(npm install *)",
+      "Bash(node -e \"require\\('@remotion/player'\\); console.log\\('OK'\\)\")",
+      "Bash(npm run *)"
+    ]
+  }
+}
