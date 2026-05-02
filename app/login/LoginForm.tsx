@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createClient, hasSupabaseEnv } from '@/lib/supabase/client';
+import { getAuthCallbackUrl } from '@/lib/siteUrl';
 
 export function LoginForm({ compact = false }: { compact?: boolean }) {
   const [email, setEmail] = useState('');
@@ -20,11 +21,10 @@ export function LoginForm({ compact = false }: { compact?: boolean }) {
     }
 
     const supabase = createClient();
-    const origin = window.location.origin;
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${origin}/auth/callback?next=/projects`,
+        emailRedirectTo: getAuthCallbackUrl('/projects'),
       },
     });
 
