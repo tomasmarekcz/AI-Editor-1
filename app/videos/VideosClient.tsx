@@ -227,6 +227,24 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
 }
 
 function VideoCard({ video }: { video: VideoListItem }) {
+  const router = useRouter();
+  const [isRetrying, setIsRetrying] = useState(false);
+  const canRetry = video.status === 'failed' || video.status === 'queued';
+
+  async function retryRender() {
+    setIsRetrying(true);
+    try {
+      const res = await fetch(`/api/videos/${video.id}/retry-render`, { method: 'POST' });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
   return (
     <article className="group rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden transition hover:border-gray-700">
       {/* Thumbnail */}
@@ -305,6 +323,16 @@ function VideoCard({ video }: { video: VideoListItem }) {
                 ✏️ Edit
               </Link>
             </>
+          )}
+          {canRetry && (
+            <button
+              type="button"
+              onClick={retryRender}
+              disabled={isRetrying}
+              className="min-w-[96px] flex-1 rounded-lg border border-amber-700 bg-amber-500/10 py-1.5 text-center text-[11px] font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRetrying ? 'Spouštím...' : video.status === 'queued' ? 'Trigger worker' : 'Try again'}
+            </button>
           )}
         </div>
       </div>

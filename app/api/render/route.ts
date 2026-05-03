@@ -3,6 +3,7 @@ import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { requireAccountApi } from '@/lib/accounts';
 import { enforceGenerationGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
+import { triggerWorkerJob } from '@/lib/worker/trigger';
 import type { SegmentData, VideoSettings } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -15,47 +16,6 @@ type RenderQueueRequest = {
   videoId?: string;
   scriptGenerationCostLines?: CostLine[];
 };
-
-async function triggerWorker(videoId: string) {
-  const workerUrl = process.env.WORKER_URL?.replace(/\/+$/, '');
-  const workerSecret = process.env.WORKER_SECRET;
-
-  if (!workerUrl || !workerSecret) {
-    return {
-      ok: false,
-      skipped: true,
-      message: 'WORKER_URL or WORKER_SECRET is not configured. Worker polling fallback will pick up the job.',
-    };
-  }
-
-  try {
-    const res = await fetch(`${workerUrl}/process-job`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${workerSecret}`,
-      },
-      body: JSON.stringify({ videoId }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      return {
-        ok: false,
-        skipped: false,
-        message: `Worker trigger failed with HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`,
-      };
-    }
-
-    return { ok: true, skipped: false, message: null };
-  } catch (err) {
-    return {
-      ok: false,
-      skipped: false,
-      message: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
 
 export async function POST(req: Request) {
   const { segments, settings, projectId, originalScript, videoId, scriptGenerationCostLines } =
@@ -185,7 +145,7 @@ export async function POST(req: Request) {
     });
   }
 
-  const worker = await triggerWorker(queuedVideoId);
+  const worker = await triggerWorkerJob(queuedVideoId);
 
   return Response.json({
     videoId: queuedVideoId,

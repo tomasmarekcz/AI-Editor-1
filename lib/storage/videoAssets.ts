@@ -36,6 +36,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function storageStatus(err: unknown) {
+  const status = typeof err === 'object' && err && 'status' in err ? Number((err as { status?: number }).status) : 0;
+  const statusCode = typeof err === 'object' && err && 'statusCode' in err ? Number((err as { statusCode?: string | number }).statusCode) : 0;
+  return { status, statusCode };
+}
+
 async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 4): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -43,8 +49,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 4): 
       return await fn();
     } catch (err) {
       lastError = err;
-      const status = typeof err === 'object' && err && 'status' in err ? Number((err as { status?: number }).status) : 0;
-      const statusCode = typeof err === 'object' && err && 'statusCode' in err ? Number((err as { statusCode?: string | number }).statusCode) : 0;
+      const { status, statusCode } = storageStatus(err);
       if (status === 413 || statusCode === 413) break;
       if (attempt === attempts) break;
       const delay = 500 * attempt * attempt;
@@ -163,17 +168,15 @@ export async function uploadLocalAsset({
 export async function createSignedUrl(supabase: SupabaseClient, storagePath: string | null, expiresIn = 3600) {
   if (!storagePath) return null;
   try {
-    const { data } = await withRetry(
-      async () => {
-        const result = await supabase.storage
-          .from(VIDEO_ASSETS_BUCKET)
-          .createSignedUrl(storagePath, expiresIn);
-        if (result.error) throw result.error;
-        return result;
-      },
-      `signed-url ${storagePath}`,
-      3,
-    );
+    const result = await supabase.storage
+      .from(VIDEO_ASSETS_BUCKET)
+      .createSignedUrl(storagePath, expiresIn);
+    if (result.error) {
+      const { status, statusCode } = storageStatus(result.error);
+      if (status === 404 || statusCode === 404) return null;
+      throw result.error;
+    }
+    const { data } = result;
     return data.signedUrl;
   } catch {
     const admin = createStorageAdminClient();
@@ -181,6 +184,12 @@ export async function createSignedUrl(supabase: SupabaseClient, storagePath: str
     const adminResult = await admin.storage
       .from(VIDEO_ASSETS_BUCKET)
       .createSignedUrl(storagePath, expiresIn);
+    if (adminResult.error) {
+      const { status, statusCode } = storageStatus(adminResult.error);
+      if (status !== 404 && statusCode !== 404) {
+        console.warn(`[storage] signed-url ${storagePath} failed`, adminResult.error);
+      }
+    }
     return adminResult.data?.signedUrl ?? null;
   }
 }

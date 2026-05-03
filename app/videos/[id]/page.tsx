@@ -4,6 +4,7 @@ import { AppSidebar } from '@/app/components/layout/AppSidebar';
 import { requireAccountPage } from '@/lib/accounts';
 import { createSignedUrl } from '@/lib/storage/videoAssets';
 import { formatUsd } from '@/lib/pricing';
+import { VideoRetryButton } from './VideoRetryButton';
 import type { Project, SavedVideo, VideoAsset } from '@/lib/projects/types';
 
 export const dynamic = 'force-dynamic';
@@ -81,6 +82,7 @@ export default async function VideoDetailPage({ params }: { params: { id: string
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <VideoRetryButton videoId={video.id} status={video.status} />
             {video.status === 'done' && (
               <>
                 <Link
