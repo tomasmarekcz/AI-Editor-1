@@ -58,7 +58,9 @@ export async function renderVideo(
     };
   });
 
-  const audioUrl = audioRelPath ? `${baseUrl}${audioRelPath}` : undefined;
+  const audioUrl = audioRelPath
+    ? `${baseUrl}/api/audio?path=${encodeURIComponent(audioRelPath)}`
+    : undefined;
 
   const inputProps: VideoInputProps = {
     segments: resolvedSegments,
