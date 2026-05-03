@@ -2,12 +2,24 @@ import path from 'path';
 import fs from 'fs';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
-import type { SegmentData, VideoSettings, VideoInputProps } from '@/types';
+import type { SegmentData, SubtitleSettings, VideoSettings, VideoInputProps } from '@/types';
 
 type RenderBitrate = `${number}k` | `${number}K` | `${number}M`;
 type X264Preset = 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow' | 'placebo';
 
 let cachedBundle: string | null = null;
+
+const DEFAULT_SUBTITLE: SubtitleSettings = {
+  font: 'Arial Black',
+  allCaps: false,
+  highlight: true,
+  chunkSize: 3,
+  positionY: 10,
+  color: '#ffffff',
+  highlightColor: '#FFE400',
+  sizeScale: 1,
+  animation: 'none',
+};
 
 const parsePositiveNumberEnv = (name: string, fallback: number): number => {
   const value = process.env[name];
@@ -30,6 +42,35 @@ const insertBeforeOutput = (args: string[], values: string[]): string[] => {
     args[args.length - 1],
   ];
 };
+
+const mimeFromPath = (filePath: string): string => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.aac') return 'audio/aac';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.m4a') return 'audio/mp4';
+  return ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
+};
+
+const fileToDataUrl = (filePath: string): string => {
+  const buffer = fs.readFileSync(filePath);
+  return `data:${mimeFromPath(filePath)};base64,${buffer.toString('base64')}`;
+};
+
+const publicRelPathToAbsPath = (relPath: string): string => {
+  return path.join(process.cwd(), 'public', relPath.startsWith('/') ? relPath.slice(1) : relPath);
+};
+
+const normalizeSubtitle = (subtitle: VideoSettings['subtitle'] | undefined): SubtitleSettings => ({
+  ...DEFAULT_SUBTITLE,
+  ...(subtitle ?? {}),
+  chunkSize: subtitle?.chunkSize ?? DEFAULT_SUBTITLE.chunkSize,
+  positionY: typeof subtitle?.positionY === 'number' ? subtitle.positionY : DEFAULT_SUBTITLE.positionY,
+  sizeScale: typeof subtitle?.sizeScale === 'number' && subtitle.sizeScale > 0 ? subtitle.sizeScale : DEFAULT_SUBTITLE.sizeScale,
+});
 
 export async function renderVideo(
   segments: SegmentData[],
@@ -60,21 +101,17 @@ export async function renderVideo(
   const baseUrl = process.env.BASE_URL ?? 'http://localhost:3000';
 
   const resolvedSegments: SegmentData[] = segments.map((seg) => {
-    // Local images are in public/tmp/images/ and served by Next.js over HTTP.
-    // Verify the file actually exists and is non-empty before passing the URL
-    // to Remotion — if it's missing/bad, fall back to the gradient background.
     let imageUrl: string | undefined;
     if (seg.localImagePath) {
-      const absPath = path.join(process.cwd(), 'public', seg.localImagePath);
+      const absPath = publicRelPathToAbsPath(seg.localImagePath);
       if (fs.existsSync(absPath) && fs.statSync(absPath).size > 1024) {
-        // Use the dedicated /api/image route — explicit content-type, always 200.
-        // Avoids Next.js static-file quirks (wrong mime types, 404 race conditions).
-        imageUrl = `${baseUrl}/api/image?path=${encodeURIComponent(seg.localImagePath)}`;
+        imageUrl = fileToDataUrl(absPath);
+      } else if (seg.imageUrl?.startsWith('http')) {
+        imageUrl = seg.imageUrl;
       }
-      // Missing or tiny file → no imageUrl → Segment renders gradient background
+    } else if (seg.imageUrl?.startsWith('http')) {
+      imageUrl = seg.imageUrl;
     }
-    // NOTE: we intentionally ignore seg.imageUrl (the raw Google URL) because
-    // Google URLs often redirect, 403, or return HTML — unreliable in a headless renderer.
 
     return {
       ...seg,
@@ -83,15 +120,19 @@ export async function renderVideo(
     };
   });
 
-  const audioUrl = audioRelPath
-    ? `${baseUrl}/api/audio?path=${encodeURIComponent(audioRelPath)}`
-    : undefined;
+  let audioUrl: string | undefined;
+  if (audioRelPath) {
+    const audioAbsPath = publicRelPathToAbsPath(audioRelPath);
+    audioUrl = fs.existsSync(audioAbsPath)
+      ? fileToDataUrl(audioAbsPath)
+      : `${baseUrl}/api/audio?path=${encodeURIComponent(audioRelPath)}`;
+  }
 
   const inputProps: VideoInputProps = {
     segments: resolvedSegments,
     fps: 30,
     orientation: settings.orientation,
-    subtitle: settings.subtitle,
+    subtitle: normalizeSubtitle(settings.subtitle),
     audioUrl,
   };
 
@@ -124,6 +165,10 @@ export async function renderVideo(
     audioBitrate,
     jpegQuality,
     x264Preset,
+    segments: resolvedSegments.length,
+    segmentsWithImages: resolvedSegments.filter((segment) => !!segment.imageUrl).length,
+    segmentsWithWordTimings: resolvedSegments.filter((segment) => (segment.wordTimings?.length ?? 0) > 0).length,
+    subtitlesEnabled: !!inputProps.subtitle,
   });
 
   await renderMedia({

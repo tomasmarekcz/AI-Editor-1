@@ -7,7 +7,7 @@ export function VideoRetryButton({ videoId, status }: { videoId: string; status:
   const router = useRouter();
   const [isRetrying, setIsRetrying] = useState(false);
 
-  if (status !== 'failed' && status !== 'queued') return null;
+  if (status !== 'failed' && status !== 'queued' && status !== 'done') return null;
 
   async function retryRender() {
     setIsRetrying(true);
@@ -30,7 +30,7 @@ export function VideoRetryButton({ videoId, status }: { videoId: string; status:
       disabled={isRetrying}
       className="rounded-lg border border-amber-700 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {isRetrying ? 'Spouštím...' : status === 'queued' ? 'Trigger worker' : 'Try rendering again'}
+      {isRetrying ? 'Spouštím...' : status === 'queued' ? 'Trigger worker' : status === 'done' ? 'Render again' : 'Try rendering again'}
     </button>
   );
 }

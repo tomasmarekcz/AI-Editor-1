@@ -6,7 +6,7 @@ import { logWorkerEvent } from '@/lib/worker/log';
 
 export const dynamic = 'force-dynamic';
 
-const RETRYABLE_STATUSES = ['queued', 'failed'] as const;
+const RETRYABLE_STATUSES = ['queued', 'failed', 'done'] as const;
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
   const auth = await requireAccountApi();

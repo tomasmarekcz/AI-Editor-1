@@ -3,6 +3,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
 import { rankGoogleImageCandidates } from '@/lib/selectGoogleImageCandidate';
+import { generateImagePlans, type ImagePlan } from '@/lib/generateImagePlans';
+import { generateWithImagen } from '@/lib/generateWithImagen';
+import { reviewImage } from '@/lib/reviewImage';
 import { enhanceScriptForAudio } from '@/lib/enhanceScriptForAudio';
 import { generateVoiceoverFull } from '@/lib/generateVoiceoverFull';
 import { transcribeAudio } from '@/lib/transcribeAudio';
@@ -13,7 +16,7 @@ import { costGeminiText, costOpenAIText, PRICING, roundCost, type CostLine } fro
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { generateEffects } from '@/lib/generateEffects';
 import { logWorkerEvent } from '@/lib/worker/log';
-import type { PipelineEvent, SegmentData, VideoEffect, VideoSettings } from '@/types';
+import type { ImageGenMode, ImageSource, PipelineEvent, SegmentData, VideoEffect, VideoSettings } from '@/types';
 
 type RunVideoPipelineInput = {
   supabase: SupabaseClient;
@@ -27,6 +30,8 @@ type RunVideoPipelineInput = {
   scriptGenerationCostLines?: CostLine[];
   onEvent?: (event: PipelineEvent) => void;
 };
+
+const MAX_IMAGE_REVIEW_ATTEMPTS = 3;
 
 export async function runVideoPipeline({
   supabase,
@@ -93,32 +98,139 @@ export async function runVideoPipeline({
   const parallelTasks: Promise<void>[] = [];
   const imagesAlreadyReady = processed.every((segment) => !!segment.localImagePath);
 
-  if (settings.imageSource === 'google' && !imagesAlreadyReady) {
-    await logPipeline('images_start', 'Starting Google image search.', { segments: segments.length });
+  if (settings.imageSource !== 'upload' && !imagesAlreadyReady) {
+    const imageSource = settings.imageSource as Exclude<ImageSource, 'upload'>;
+    await logPipeline('images_start', 'Starting image generation/search.', {
+      segments: segments.length,
+      imageSource,
+    });
     await supabase
       .from('videos')
       .update({ status: 'generating_images', current_step: 'generating_images', updated_at: new Date().toISOString() })
       .eq('id', videoId);
-    send({ type: 'step', step: 'images', message: 'Hledám obrázky na Google...', total: segments.length });
+    send({ type: 'step', step: 'images', message: 'Připravuji obrázky...', total: segments.length });
+
+    let plans: ImagePlan[];
+    try {
+      plans = await generateImagePlans(processed, imageSource, settings.orientation);
+      const inputTokens = Math.ceil(processed.map((s) => s.text).join('\n').length / 4) + 700;
+      const outputTokens = Math.ceil(JSON.stringify(plans).length / 4);
+      actualCostLines.push({
+        provider: 'google',
+        model: 'gemini-2.5-flash-lite',
+        step: 'image_planning',
+        usage: { estimatedInputTokens: inputTokens, estimatedOutputTokens: outputTokens, segments: processed.length },
+        costUsd: costGeminiText(inputTokens, outputTokens),
+      });
+    } catch (err) {
+      await logPipeline('image_planning_failed', 'Image planning failed; using fallback prompts.', { err }, 'warn');
+      const fallbackMode: ImageGenMode = imageSource === 'google' ? 'google' : 'imagen';
+      plans = processed.map((segment) => ({
+        mode: fallbackMode,
+        prompt: segment.keywords || segment.text.slice(0, 100),
+      }));
+    }
+
     parallelTasks.push(
       Promise.all(
         processed.map(async (seg, i) => {
+          const plan = plans[i] ?? {
+            mode: imageSource === 'google' ? 'google' : 'imagen',
+            prompt: seg.keywords || seg.text.slice(0, 100),
+          };
+          let localImagePath: string | undefined;
+          let usedMode: ImageGenMode = plan.mode;
+          let currentPrompt = plan.prompt;
+          let approved = false;
+          let attempt = 0;
+
           try {
-            const candidates = await searchImageCandidateDetails(seg.keywords, 10);
-            const ranked = await rankGoogleImageCandidates(
-              candidates,
-              seg.text,
-              fullOriginalScript,
-              settings.orientation,
-            );
-            usage.googleImageSelections += 1;
-            const localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), seg.id);
-            usage.serperQueries += 1;
-            processed[i] = { ...processed[i], localImagePath };
-            send({ type: 'image_ready', index: i, imageUrl: localImagePath });
+            while (attempt < MAX_IMAGE_REVIEW_ATTEMPTS && !approved) {
+              if (usedMode === 'google') {
+                const candidates = await searchImageCandidateDetails(currentPrompt, 10);
+                usage.serperQueries += 1;
+                const ranked = await rankGoogleImageCandidates(
+                  candidates,
+                  seg.text,
+                  fullOriginalScript,
+                  settings.orientation,
+                );
+                usage.googleImageSelections += 1;
+                localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), seg.id);
+              } else {
+                try {
+                  localImagePath = await generateWithImagen(currentPrompt, seg.id, settings.orientation);
+                  usage.imagenImages += 1;
+                } catch (imagenErr) {
+                  await logPipeline('imagen_failed_google_fallback', `Imagen failed for segment ${i}; using Google fallback.`, {
+                    index: i,
+                    imagenErr,
+                  }, 'warn');
+                  usedMode = 'google';
+                  currentPrompt = seg.keywords || seg.text.slice(0, 80);
+                  const candidates = await searchImageCandidateDetails(currentPrompt, 10);
+                  usage.serperQueries += 1;
+                  const ranked = await rankGoogleImageCandidates(
+                    candidates,
+                    seg.text,
+                    fullOriginalScript,
+                    settings.orientation,
+                  );
+                  usage.googleImageSelections += 1;
+                  localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), seg.id);
+                }
+              }
+
+              if (!localImagePath) {
+                attempt += 1;
+                continue;
+              }
+
+              try {
+                const review = await reviewImage(
+                  localImagePath,
+                  seg.text,
+                  fullOriginalScript,
+                  usedMode,
+                  currentPrompt,
+                );
+
+                if (review.approved) {
+                  approved = true;
+                } else {
+                  currentPrompt = review.newPrompt || currentPrompt;
+                  attempt += 1;
+                }
+              } catch (reviewErr) {
+                await logPipeline('image_review_failed', `Image review failed for segment ${i}; accepting image.`, {
+                  index: i,
+                  reviewErr,
+                }, 'warn');
+                approved = true;
+              }
+            }
+
+            processed[i] = {
+              ...processed[i],
+              localImagePath,
+              imagePrompt: currentPrompt,
+              imageGenMode: usedMode,
+            };
+            send({ type: 'image_ready', index: i, imageUrl: localImagePath ?? '' });
+            await logPipeline('image_ready', `Image ${i} ready.`, {
+              index: i,
+              mode: usedMode,
+              hasLocalImagePath: !!localImagePath,
+              attempts: attempt + 1,
+            });
           } catch (err) {
             console.error(`[img ${i}]`, err);
-            await logPipeline('image_failed', `Image ${i} failed.`, { index: i, err }, 'warn');
+            processed[i] = {
+              ...processed[i],
+              imagePrompt: currentPrompt,
+              imageGenMode: usedMode,
+            };
+            await logPipeline('image_failed', `Image ${i} failed.`, { index: i, mode: usedMode, currentPrompt, err }, 'warn');
           }
         }),
       ).then(() => {}),
@@ -371,6 +483,28 @@ export async function runVideoPipeline({
         estimatedOutputTokens: usage.googleImageSelections * 40,
       },
       costUsd: costGeminiText(usage.googleImageSelections * 900, usage.googleImageSelections * 40),
+    });
+  }
+  if (usage.imagenImages > 0) {
+    actualCostLines.push({
+      provider: 'google',
+      model: 'imagen-4.0-generate-001',
+      step: 'image_generation',
+      usage: { images: usage.imagenImages },
+      costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+    });
+  }
+  if (usage.generatedImages > 0) {
+    actualCostLines.push({
+      provider: 'google',
+      model: 'gemini-2.5-flash-lite',
+      step: 'image_review',
+      usage: {
+        estimatedReviews: usage.generatedImages,
+        estimatedInputTokens: usage.generatedImages * 450,
+        estimatedOutputTokens: usage.generatedImages * 50,
+      },
+      costUsd: costGeminiText(usage.generatedImages * 450, usage.generatedImages * 50),
     });
   }
   if (imageAssetRows.length > 0) {

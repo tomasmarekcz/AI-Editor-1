@@ -229,7 +229,7 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
 function VideoCard({ video }: { video: VideoListItem }) {
   const router = useRouter();
   const [isRetrying, setIsRetrying] = useState(false);
-  const canRetry = video.status === 'failed' || video.status === 'queued';
+  const canRetry = video.status === 'failed' || video.status === 'queued' || video.status === 'done';
 
   async function retryRender() {
     setIsRetrying(true);
@@ -331,7 +331,7 @@ function VideoCard({ video }: { video: VideoListItem }) {
               disabled={isRetrying}
               className="min-w-[96px] flex-1 rounded-lg border border-amber-700 bg-amber-500/10 py-1.5 text-center text-[11px] font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isRetrying ? 'Spouštím...' : video.status === 'queued' ? 'Trigger worker' : 'Try again'}
+              {isRetrying ? 'Spouštím...' : video.status === 'queued' ? 'Trigger worker' : video.status === 'done' ? 'Render again' : 'Try again'}
             </button>
           )}
         </div>
