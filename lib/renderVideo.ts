@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import { pathToFileURL } from 'url';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
 import type { SegmentData, SubtitleSettings, VideoSettings, VideoInputProps } from '@/types';
@@ -41,23 +42,6 @@ const insertBeforeOutput = (args: string[], values: string[]): string[] => {
     ...values,
     args[args.length - 1],
   ];
-};
-
-const mimeFromPath = (filePath: string): string => {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === '.png') return 'image/png';
-  if (ext === '.webp') return 'image/webp';
-  if (ext === '.gif') return 'image/gif';
-  if (ext === '.mp3') return 'audio/mpeg';
-  if (ext === '.aac') return 'audio/aac';
-  if (ext === '.wav') return 'audio/wav';
-  if (ext === '.m4a') return 'audio/mp4';
-  return ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
-};
-
-const fileToDataUrl = (filePath: string): string => {
-  const buffer = fs.readFileSync(filePath);
-  return `data:${mimeFromPath(filePath)};base64,${buffer.toString('base64')}`;
 };
 
 const publicRelPathToAbsPath = (relPath: string): string => {
@@ -105,7 +89,7 @@ export async function renderVideo(
     if (seg.localImagePath) {
       const absPath = publicRelPathToAbsPath(seg.localImagePath);
       if (fs.existsSync(absPath) && fs.statSync(absPath).size > 1024) {
-        imageUrl = fileToDataUrl(absPath);
+        imageUrl = pathToFileURL(absPath).href;
       } else if (seg.imageUrl?.startsWith('http')) {
         imageUrl = seg.imageUrl;
       }
@@ -124,7 +108,7 @@ export async function renderVideo(
   if (audioRelPath) {
     const audioAbsPath = publicRelPathToAbsPath(audioRelPath);
     audioUrl = fs.existsSync(audioAbsPath)
-      ? fileToDataUrl(audioAbsPath)
+      ? pathToFileURL(audioAbsPath).href
       : `${baseUrl}/api/audio?path=${encodeURIComponent(audioRelPath)}`;
   }
 
@@ -142,10 +126,10 @@ export async function renderVideo(
     inputProps: inputProps as unknown as Record<string, unknown>,
   });
 
-  const renderScale = parsePositiveNumberEnv('RENDER_SCALE', process.env.NODE_ENV === 'production' ? 0.6667 : 1);
+  const renderScale = parsePositiveNumberEnv('RENDER_SCALE', process.env.NODE_ENV === 'production' ? 0.5 : 1);
   const renderConcurrency = parseIntegerEnv('RENDER_CONCURRENCY', process.env.NODE_ENV === 'production' ? 1 : 2);
-  const ffmpegThreads = parseIntegerEnv('RENDER_FFMPEG_THREADS', process.env.NODE_ENV === 'production' ? 2 : 4);
-  const videoBitrate = (process.env.RENDER_VIDEO_BITRATE ?? (process.env.NODE_ENV === 'production' ? '2500k' : '6M')) as RenderBitrate;
+  const ffmpegThreads = parseIntegerEnv('RENDER_FFMPEG_THREADS', process.env.NODE_ENV === 'production' ? 1 : 4);
+  const videoBitrate = (process.env.RENDER_VIDEO_BITRATE ?? (process.env.NODE_ENV === 'production' ? '1800k' : '6M')) as RenderBitrate;
   const audioBitrate = (process.env.RENDER_AUDIO_BITRATE ?? (process.env.NODE_ENV === 'production' ? '128k' : '320k')) as RenderBitrate;
   const jpegQuality = parseIntegerEnv('RENDER_JPEG_QUALITY', process.env.NODE_ENV === 'production' ? 82 : 90);
   const x264Preset = (process.env.RENDER_X264_PRESET ?? (process.env.NODE_ENV === 'production' ? 'ultrafast' : 'veryfast')) as X264Preset;
@@ -182,8 +166,8 @@ export async function renderVideo(
     concurrency: renderConcurrency,
     disallowParallelEncoding: true,
     jpegQuality,
-    offthreadVideoCacheSizeInBytes: 64 * 1024 * 1024,
-    mediaCacheSizeInBytes: 64 * 1024 * 1024,
+    offthreadVideoCacheSizeInBytes: 16 * 1024 * 1024,
+    mediaCacheSizeInBytes: 16 * 1024 * 1024,
     ffmpegOverride: ({ type, args }) => (
       type === 'stitcher'
         ? insertBeforeOutput(args, ['-threads', String(ffmpegThreads)])

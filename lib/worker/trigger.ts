@@ -8,15 +8,6 @@ type WorkerTriggerResult = {
   endpoint?: string;
 };
 
-function workerBaseUrl() {
-  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : '';
-  const raw = (process.env.WORKER_URL || process.env.BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || railwayDomain || getSiteUrl()).trim();
-  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-  return withProtocol.replace(/\/+$/, '');
-}
-
 function normalizeBaseUrl(raw: string) {
   const clean = raw.trim();
   const withProtocol = /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
@@ -25,6 +16,14 @@ function normalizeBaseUrl(raw: string) {
 
 function addEndpoint(endpoints: string[], endpoint: string) {
   if (!endpoints.includes(endpoint)) endpoints.push(endpoint);
+}
+
+function equivalentOrigin(a: string, b: string) {
+  try {
+    return new URL(normalizeBaseUrl(a)).origin === new URL(normalizeBaseUrl(b)).origin;
+  } catch {
+    return false;
+  }
 }
 
 function appendWorkerEndpoints(endpoints: string[], base: string) {
@@ -49,13 +48,26 @@ function appendInternalEndpoint(endpoints: string[]) {
 
 function workerEndpoints() {
   const endpoints: string[] = [];
+  const internalBase = process.env.BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.RAILWAY_PUBLIC_DOMAIN || getSiteUrl();
   if (process.env.WORKER_URL?.trim()) {
-    appendWorkerEndpoints(endpoints, process.env.WORKER_URL);
+    if (equivalentOrigin(process.env.WORKER_URL, internalBase)) {
+      appendInternalEndpoint(endpoints);
+    } else {
+      appendWorkerEndpoints(endpoints, process.env.WORKER_URL);
+    }
   } else {
-    appendWorkerEndpoints(endpoints, workerBaseUrl());
+    appendInternalEndpoint(endpoints);
   }
   appendInternalEndpoint(endpoints);
   return endpoints;
+}
+
+function summarizeHttpBody(body: string) {
+  if (!body) return '';
+  if (body.includes('<!DOCTYPE html') || body.includes('<html')) {
+    return '[html response omitted]';
+  }
+  return body.slice(0, 500);
 }
 
 export async function triggerWorkerJob(videoId: string): Promise<WorkerTriggerResult> {
@@ -118,7 +130,8 @@ export async function triggerWorkerJob(videoId: string): Promise<WorkerTriggerRe
       }
 
       const body = await res.text().catch(() => '');
-      const error = `${endpoint} -> HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`;
+      const bodySummary = summarizeHttpBody(body);
+      const error = `${endpoint} -> HTTP ${res.status}${bodySummary ? `: ${bodySummary.slice(0, 200)}` : ''}`;
       errors.push(error);
       await logWorkerEvent({
         videoId,
@@ -126,7 +139,7 @@ export async function triggerWorkerJob(videoId: string): Promise<WorkerTriggerRe
         event: 'rejected',
         level: 'warn',
         message: error,
-        metadata: { status: res.status, body: body.slice(0, 1000) },
+        metadata: { status: res.status, body: bodySummary },
       });
     } catch (err) {
       const error = `${endpoint} -> ${err instanceof Error ? err.message : String(err)}`;

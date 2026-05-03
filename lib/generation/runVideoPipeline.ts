@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
@@ -32,6 +33,21 @@ type RunVideoPipelineInput = {
 };
 
 const MAX_IMAGE_REVIEW_ATTEMPTS = 3;
+
+const publicLocalPathToAbsolute = (localPath: string): string => {
+  const normalized = localPath.startsWith('/') ? localPath.slice(1) : localPath;
+  return path.join(process.cwd(), 'public', normalized);
+};
+
+const localImageExists = (localImagePath: string | undefined): boolean => {
+  if (!localImagePath) return false;
+  try {
+    const stat = fs.statSync(publicLocalPathToAbsolute(localImagePath));
+    return stat.isFile() && stat.size > 1024;
+  } catch {
+    return false;
+  }
+};
 
 export async function runVideoPipeline({
   supabase,
@@ -83,7 +99,11 @@ export async function runVideoPipeline({
 
   send({ type: 'step', step: 'video_created', message: 'Ukládám video do historie...' });
 
-  let processed: SegmentData[] = segments.map((segment) => ({ ...segment }));
+  let processed: SegmentData[] = segments.map((segment) => (
+    segment.localImagePath && !localImageExists(segment.localImagePath)
+      ? { ...segment, localImagePath: undefined, imageUrl: undefined }
+      : { ...segment }
+  ));
   const actualCostLines: CostLine[] = (scriptGenerationCostLines ?? [])
     .filter((line) => line.step === 'script_generation')
     .slice(0, 1);
@@ -96,7 +116,7 @@ export async function runVideoPipeline({
   };
 
   const parallelTasks: Promise<void>[] = [];
-  const imagesAlreadyReady = processed.every((segment) => !!segment.localImagePath);
+  const imagesAlreadyReady = processed.every((segment) => localImageExists(segment.localImagePath));
 
   if (settings.imageSource !== 'upload' && !imagesAlreadyReady) {
     const imageSource = settings.imageSource as Exclude<ImageSource, 'upload'>;
@@ -427,6 +447,13 @@ export async function runVideoPipeline({
   const imageAssetRows = [];
   for (const [index, seg] of processed.entries()) {
     if (!seg.localImagePath) continue;
+    if (!localImageExists(seg.localImagePath)) {
+      await logPipeline('asset_image_missing', `Image asset ${index} local file is missing; skipping asset upload.`, {
+        index,
+        localImagePath: seg.localImagePath,
+      }, 'warn');
+      continue;
+    }
     try {
       const imageAsset = await uploadLocalAsset({
         supabase,
@@ -512,7 +539,7 @@ export async function runVideoPipeline({
   }
 
   let thumbnailPath: string | null = null;
-  const firstImage = processed.find((seg) => seg.localImagePath)?.localImagePath;
+  const firstImage = processed.find((seg) => localImageExists(seg.localImagePath))?.localImagePath;
   if (firstImage) {
     try {
       const thumbAsset = await uploadLocalAsset({

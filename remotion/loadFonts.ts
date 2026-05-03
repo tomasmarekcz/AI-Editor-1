@@ -13,7 +13,7 @@ export const GOOGLE_FONTS_URL =
 export const BOLD_FONT_FACE = `
   @font-face {
     font-family: 'TheBoldFont';
-    src: url('/fonts/TheBoldFont-Bold.ttf') format('truetype');
+    src: local('Impact');
     font-weight: 700;
     font-style: normal;
   }
