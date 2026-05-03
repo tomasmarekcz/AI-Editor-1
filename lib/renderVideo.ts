@@ -4,7 +4,32 @@ import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
 import type { SegmentData, VideoSettings, VideoInputProps } from '@/types';
 
+type RenderBitrate = `${number}k` | `${number}K` | `${number}M`;
+type X264Preset = 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow' | 'placebo';
+
 let cachedBundle: string | null = null;
+
+const parsePositiveNumberEnv = (name: string, fallback: number): number => {
+  const value = process.env[name];
+  if (!value) return fallback;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const parseIntegerEnv = (name: string, fallback: number): number => {
+  return Math.max(1, Math.round(parsePositiveNumberEnv(name, fallback)));
+};
+
+const insertBeforeOutput = (args: string[], values: string[]): string[] => {
+  if (args.length === 0) return values;
+
+  return [
+    ...args.slice(0, -1),
+    ...values,
+    args[args.length - 1],
+  ];
+};
 
 export async function renderVideo(
   segments: SegmentData[],
@@ -76,15 +101,55 @@ export async function renderVideo(
     inputProps: inputProps as unknown as Record<string, unknown>,
   });
 
+  const renderScale = parsePositiveNumberEnv('RENDER_SCALE', process.env.NODE_ENV === 'production' ? 0.6667 : 1);
+  const renderConcurrency = parseIntegerEnv('RENDER_CONCURRENCY', process.env.NODE_ENV === 'production' ? 1 : 2);
+  const ffmpegThreads = parseIntegerEnv('RENDER_FFMPEG_THREADS', process.env.NODE_ENV === 'production' ? 2 : 4);
+  const videoBitrate = (process.env.RENDER_VIDEO_BITRATE ?? (process.env.NODE_ENV === 'production' ? '2500k' : '6M')) as RenderBitrate;
+  const audioBitrate = (process.env.RENDER_AUDIO_BITRATE ?? (process.env.NODE_ENV === 'production' ? '128k' : '320k')) as RenderBitrate;
+  const jpegQuality = parseIntegerEnv('RENDER_JPEG_QUALITY', process.env.NODE_ENV === 'production' ? 82 : 90);
+  const x264Preset = (process.env.RENDER_X264_PRESET ?? (process.env.NODE_ENV === 'production' ? 'ultrafast' : 'veryfast')) as X264Preset;
+
+  console.log('[render] starting remotion render', {
+    jobId,
+    durationInFrames: composition.durationInFrames,
+    fps: composition.fps,
+    width: composition.width,
+    height: composition.height,
+    outputWidth: Math.round(composition.width * renderScale),
+    outputHeight: Math.round(composition.height * renderScale),
+    renderScale,
+    renderConcurrency,
+    ffmpegThreads,
+    videoBitrate,
+    audioBitrate,
+    jpegQuality,
+    x264Preset,
+  });
+
   await renderMedia({
     composition,
     serveUrl: cachedBundle,
     codec: 'h264',
-    videoBitrate: '6M',
+    videoBitrate,
+    audioBitrate,
+    x264Preset,
+    scale: renderScale,
+    concurrency: renderConcurrency,
+    disallowParallelEncoding: true,
+    jpegQuality,
+    offthreadVideoCacheSizeInBytes: 64 * 1024 * 1024,
+    mediaCacheSizeInBytes: 64 * 1024 * 1024,
+    ffmpegOverride: ({ type, args }) => (
+      type === 'stitcher'
+        ? insertBeforeOutput(args, ['-threads', String(ffmpegThreads)])
+        : args
+    ),
     outputLocation: outputPath,
     inputProps: inputProps as unknown as Record<string, unknown>,
     onProgress: ({ progress }) => onProgress?.(Math.round(progress * 100)),
   });
+
+  console.log('[render] finished remotion render', { jobId, outputPath });
 
   return `/tmp/videos/${jobId}.mp4`;
 }
