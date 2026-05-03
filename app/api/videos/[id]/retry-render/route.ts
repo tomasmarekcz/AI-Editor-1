@@ -2,6 +2,7 @@ import { requireAccountApi } from '@/lib/accounts';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import { enforceGenerationGuardrails } from '@/lib/safetyGuardrails';
 import { triggerWorkerJob } from '@/lib/worker/trigger';
+import { logWorkerEvent } from '@/lib/worker/log';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,7 +57,28 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     return Response.json({ error: error.message }, { status: 500 });
   }
 
+  await logWorkerEvent({
+    supabase,
+    videoId: video.id,
+    accountId: account.id,
+    projectId: video.project_id,
+    source: 'api-retry-render',
+    event: 'queued',
+    message: `Video render retry queued from status ${video.status}.`,
+    metadata: { previousStatus: video.status },
+  });
+
   const worker = await triggerWorkerJob(video.id);
+  if (!worker.ok) {
+    await supabase
+      .from('videos')
+      .update({
+        last_worker_error: worker.message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', video.id)
+      .eq('account_id', account.id);
+  }
 
   return Response.json({
     videoId: video.id,

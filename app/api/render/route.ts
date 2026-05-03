@@ -4,6 +4,7 @@ import { requireAccountApi } from '@/lib/accounts';
 import { enforceGenerationGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import { triggerWorkerJob } from '@/lib/worker/trigger';
+import { logWorkerEvent } from '@/lib/worker/log';
 import type { SegmentData, VideoSettings } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -145,7 +146,34 @@ export async function POST(req: Request) {
     });
   }
 
+  await logWorkerEvent({
+    supabase,
+    videoId: queuedVideoId,
+    accountId: account.id,
+    projectId,
+    source: 'api-render',
+    event: 'queued',
+    message: 'Video job queued from /api/render.',
+    metadata: {
+      segments: segments.length,
+      estimatedCostUsd: estimate.totalUsd,
+      workerUrlConfigured: Boolean(process.env.WORKER_URL),
+      baseUrlConfigured: Boolean(process.env.BASE_URL),
+      nextPublicSiteUrlConfigured: Boolean(process.env.NEXT_PUBLIC_SITE_URL),
+    },
+  });
+
   const worker = await triggerWorkerJob(queuedVideoId);
+  if (!worker.ok) {
+    await supabase
+      .from('videos')
+      .update({
+        last_worker_error: worker.message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', queuedVideoId)
+      .eq('account_id', account.id);
+  }
 
   return Response.json({
     videoId: queuedVideoId,

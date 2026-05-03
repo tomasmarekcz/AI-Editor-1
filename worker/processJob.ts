@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { FREE_PLAN_GENERATION_MESSAGE } from '@/lib/planGuardrails';
 import { runVideoPipeline } from '@/lib/generation/runVideoPipeline';
+import { logWorkerEvent } from '@/lib/worker/log';
 import type { SegmentData, VideoSettings } from '@/types';
 
 type ProcessJobResult =
@@ -28,13 +29,44 @@ export async function claimVideoJob(videoId: string) {
   const supabase = createSupabaseAdminClient();
   if (!supabase) throw new Error('SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
 
+  await logWorkerEvent({
+    supabase,
+    videoId,
+    source: 'worker-claim',
+    event: 'claim_attempt',
+    message: 'Attempting to claim video job by id.',
+    metadata: { workerId: workerId() },
+  });
+
   const { data, error } = await supabase.rpc('claim_video_job', {
     p_video_id: videoId,
     p_worker_id: workerId(),
   });
 
-  if (error) throw error;
+  if (error) {
+    await logWorkerEvent({
+      supabase,
+      videoId,
+      source: 'worker-claim',
+      event: 'claim_error',
+      level: 'error',
+      message: error.message,
+      metadata: { error },
+    });
+    throw error;
+  }
   const row = Array.isArray(data) ? data[0] : null;
+  await logWorkerEvent({
+    supabase,
+    videoId,
+    accountId: row?.account_id ? String(row.account_id) : null,
+    projectId: row?.project_id ? String(row.project_id) : null,
+    source: 'worker-claim',
+    event: row ? 'claimed' : 'not_claimed',
+    level: row ? 'info' : 'warn',
+    message: row ? 'Video job claimed.' : 'No queued video row was returned. Status is likely no longer queued.',
+    metadata: { workerId: workerId() },
+  });
   return row ? { supabase, video: normalizeVideo(row as Record<string, unknown>) } : null;
 }
 
@@ -42,12 +74,40 @@ export async function claimNextVideoJob() {
   const supabase = createSupabaseAdminClient();
   if (!supabase) throw new Error('SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
 
+  await logWorkerEvent({
+    supabase,
+    source: 'worker-claim',
+    event: 'claim_next_attempt',
+    message: 'Attempting to claim next queued video job.',
+    metadata: { workerId: workerId() },
+  });
+
   const { data, error } = await supabase.rpc('claim_next_video_job', {
     p_worker_id: workerId(),
   });
 
-  if (error) throw error;
+  if (error) {
+    await logWorkerEvent({
+      supabase,
+      source: 'worker-claim',
+      event: 'claim_next_error',
+      level: 'error',
+      message: error.message,
+      metadata: { error },
+    });
+    throw error;
+  }
   const row = Array.isArray(data) ? data[0] : null;
+  await logWorkerEvent({
+    supabase,
+    videoId: row?.id ? String(row.id) : null,
+    accountId: row?.account_id ? String(row.account_id) : null,
+    projectId: row?.project_id ? String(row.project_id) : null,
+    source: 'worker-claim',
+    event: row ? 'claim_next_claimed' : 'claim_next_empty',
+    message: row ? 'Next queued job claimed.' : 'No queued jobs available.',
+    metadata: { workerId: workerId() },
+  });
   return row ? { supabase, video: normalizeVideo(row as Record<string, unknown>) } : null;
 }
 
@@ -96,6 +156,19 @@ export async function processClaimedJob(
   const { supabase, video } = claimed;
 
   try {
+    await logWorkerEvent({
+      supabase,
+      videoId: video.id,
+      accountId: video.accountId,
+      projectId: video.projectId,
+      source: 'worker-process',
+      event: 'start',
+      message: 'Starting claimed video job.',
+      metadata: {
+        segments: video.segments.length,
+        settingsKeys: Object.keys(video.settings ?? {}),
+      },
+    });
     await ensureAccountCanRun(supabase, video);
     await runVideoPipeline({
       supabase,
@@ -109,13 +182,44 @@ export async function processClaimedJob(
       onEvent: (event) => {
         if (event.type === 'step') console.log(`[worker] ${video.id}: ${event.step}`);
         if (event.type === 'render_progress') console.log(`[worker] ${video.id}: render ${event.progress}%`);
+        void logWorkerEvent({
+          supabase,
+          videoId: video.id,
+          accountId: video.accountId,
+          projectId: video.projectId,
+          source: 'pipeline-event',
+          event: event.type,
+          message: event.type === 'step' ? event.message : undefined,
+          metadata: event,
+        });
       },
+    });
+
+    await logWorkerEvent({
+      supabase,
+      videoId: video.id,
+      accountId: video.accountId,
+      projectId: video.projectId,
+      source: 'worker-process',
+      event: 'done',
+      message: 'Video job finished successfully.',
     });
 
     return { ok: true, videoId: video.id, processed: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[worker] ${video.id} failed:`, message);
+    await logWorkerEvent({
+      supabase,
+      videoId: video.id,
+      accountId: video.accountId,
+      projectId: video.projectId,
+      source: 'worker-process',
+      event: 'failed',
+      level: 'error',
+      message,
+      metadata: { err },
+    });
     await markJobFailed(supabase, video.id, message);
     return { ok: false, videoId: video.id, error: message };
   }

@@ -1,4 +1,5 @@
 import { processVideoJob } from '@/worker/processJob';
+import { logWorkerEvent } from '@/lib/worker/log';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,8 +20,35 @@ export async function POST(req: Request) {
     return Response.json({ error: 'videoId is required.' }, { status: 400 });
   }
 
+  console.log(`[api/worker/process-job] accepted ${videoId}`);
+  await logWorkerEvent({
+    videoId,
+    source: 'api-worker',
+    event: 'accepted',
+    message: 'Internal worker endpoint accepted job request.',
+  });
+
   void processVideoJob(videoId).then((result) => {
-    if (!result.ok) console.error('[api/worker/process-job] failed:', result);
+    if (!result.ok) {
+      console.error('[api/worker/process-job] failed:', result);
+      void logWorkerEvent({
+        videoId,
+        source: 'api-worker',
+        event: 'failed',
+        level: 'error',
+        message: result.error,
+        metadata: result,
+      });
+    } else {
+      console.log('[api/worker/process-job] result:', result);
+      void logWorkerEvent({
+        videoId,
+        source: 'api-worker',
+        event: 'completed',
+        message: result.processed ? 'Job processing completed.' : result.reason,
+        metadata: result,
+      });
+    }
   });
 
   return Response.json({ ok: true, videoId, accepted: true }, { status: 202 });

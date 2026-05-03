@@ -12,6 +12,7 @@ import { createSignedUrl, uploadBufferAsset, uploadLocalAsset, VIDEO_ASSETS_BUCK
 import { costGeminiText, costOpenAIText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { generateEffects } from '@/lib/generateEffects';
+import { logWorkerEvent } from '@/lib/worker/log';
 import type { PipelineEvent, SegmentData, VideoEffect, VideoSettings } from '@/types';
 
 type RunVideoPipelineInput = {
@@ -44,6 +45,26 @@ export async function runVideoPipeline({
   const send = (event: PipelineEvent) => onEvent?.(event);
   const fullOriginalScript = originalScript ?? segments.map((segment) => segment.text).join('\n\n');
 
+  const logPipeline = (event: string, message?: string, metadata?: Record<string, unknown>, level: 'debug' | 'info' | 'warn' | 'error' = 'info') =>
+    logWorkerEvent({
+      supabase,
+      videoId,
+      accountId,
+      projectId,
+      source: 'pipeline',
+      event,
+      level,
+      message,
+      metadata,
+    });
+
+  await logPipeline('start', 'Pipeline started.', {
+    segments: segments.length,
+    imageSource: settings.imageSource,
+    ttsProvider: settings.ttsProvider,
+    orientation: settings.orientation,
+  });
+
   await supabase
     .from('videos')
     .update({
@@ -73,6 +94,7 @@ export async function runVideoPipeline({
   const imagesAlreadyReady = processed.every((segment) => !!segment.localImagePath);
 
   if (settings.imageSource === 'google' && !imagesAlreadyReady) {
+    await logPipeline('images_start', 'Starting Google image search.', { segments: segments.length });
     await supabase
       .from('videos')
       .update({ status: 'generating_images', current_step: 'generating_images', updated_at: new Date().toISOString() })
@@ -96,6 +118,7 @@ export async function runVideoPipeline({
             send({ type: 'image_ready', index: i, imageUrl: localImagePath });
           } catch (err) {
             console.error(`[img ${i}]`, err);
+            await logPipeline('image_failed', `Image ${i} failed.`, { index: i, err }, 'warn');
           }
         }),
       ).then(() => {}),
@@ -112,6 +135,7 @@ export async function runVideoPipeline({
   await Promise.all(parallelTasks);
   const effects = await effectsPromise;
   if (effects.length > 0) {
+    await logPipeline('effects_ready', 'Effects generated.', { effects });
     processed = processed.map((seg, i) => ({ ...seg, effect: effects[i] ?? 'none' }));
     send({ type: 'effects_ready', effects });
     const inputTokens = Math.ceil(JSON.stringify(segments.map((s) => s.text)).length / 4) + 500;
@@ -144,6 +168,7 @@ export async function runVideoPipeline({
       .eq('id', videoId);
   } catch (err) {
     console.error('[enhance]', err);
+    await logPipeline('audio_enhancement_failed', 'Audio enhancement failed; continuing with original text.', { err }, 'warn');
   }
   const enhancedInputTokens = Math.ceil(processed.map((s) => s.text).join('\n').length / 4) + 600;
   const enhancedOutputTokens = Math.ceil(processed.map((s) => s.audioText ?? s.text).join('\n').length / 4);
@@ -168,6 +193,7 @@ export async function runVideoPipeline({
     settings,
   );
   const audioDurationSeconds = processed.reduce((sum, segment) => sum + (segment.audioDuration ?? segment.duration ?? 0), 0);
+  await logPipeline('voice_ready', 'Voiceover generated.', { audioRelPath, audioDurationSeconds });
 
   const audioAsset = await uploadLocalAsset({
     supabase,
@@ -224,8 +250,10 @@ export async function runVideoPipeline({
 
   const sttWords = await transcribeAudio(audioAbsPath).catch((err) => {
     console.error('[transcribe]', err);
+    void logPipeline('transcription_failed', 'Transcription failed; continuing without word timings.', { err }, 'warn');
     return [];
   });
+  await logPipeline('transcription_ready', 'Transcription step finished.', { words: sttWords.length });
   actualCostLines.push({
     provider: 'openai',
     model: 'whisper-1',
@@ -277,6 +305,7 @@ export async function runVideoPipeline({
       .update({ render_progress: pct, updated_at: new Date().toISOString() })
       .eq('id', videoId);
   });
+  await logPipeline('render_ready', 'Remotion render finished.', { videoUrl });
 
   await supabase
     .from('videos')
@@ -320,6 +349,7 @@ export async function runVideoPipeline({
       if (seg.imageGenMode === 'imagen') usage.imagenImages += 1;
     } catch (assetErr) {
       console.warn(`[asset image ${index}]`, assetErr);
+      await logPipeline('asset_image_failed', `Image asset ${index} upload failed.`, { index, assetErr }, 'warn');
     }
   }
   if (usage.serperQueries > 0) {
@@ -376,6 +406,7 @@ export async function runVideoPipeline({
       });
     } catch (thumbErr) {
       console.warn('[asset thumbnail]', thumbErr);
+      await logPipeline('thumbnail_failed', 'Thumbnail upload failed.', { thumbErr }, 'warn');
     }
   }
 
@@ -387,6 +418,11 @@ export async function runVideoPipeline({
     folder: 'final',
     localPath: videoUrl,
     filename: 'final.mp4',
+  });
+  await logPipeline('final_uploaded', 'Final video uploaded.', {
+    storagePath: finalAsset.storagePath,
+    sizeBytes: finalAsset.sizeBytes,
+    mimeType: finalAsset.mimeType,
   });
   await supabase.from('video_assets').insert({
     user_id: userId,
@@ -451,6 +487,12 @@ export async function runVideoPipeline({
       updated_at: new Date().toISOString(),
     })
     .eq('id', videoId);
+
+  await logPipeline('done', 'Pipeline completed.', {
+    durationSeconds,
+    actualCostUsd,
+    finalVideoPath: finalAsset.storagePath,
+  });
 
   send({ type: 'done', videoUrl: finalSignedUrl ?? videoUrl, videoId });
 }
