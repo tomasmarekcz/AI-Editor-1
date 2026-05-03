@@ -11,7 +11,9 @@ function workerBaseUrl() {
   const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
     : '';
-  return (process.env.WORKER_URL || process.env.BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || railwayDomain || getSiteUrl()).replace(/\/+$/, '');
+  const raw = (process.env.WORKER_URL || process.env.BASE_URL || process.env.NEXT_PUBLIC_SITE_URL || railwayDomain || getSiteUrl()).trim();
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return withProtocol.replace(/\/+$/, '');
 }
 
 function workerEndpoints(base: string) {
