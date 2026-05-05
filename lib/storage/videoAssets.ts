@@ -174,6 +174,21 @@ export async function uploadLocalAsset({
 
 export async function createSignedUrl(supabase: SupabaseClient, storagePath: string | null, expiresIn = 3600) {
   if (!storagePath) return null;
+  const admin = createStorageAdminClient();
+
+  if (admin) {
+    const adminResult = await admin.storage
+      .from(VIDEO_ASSETS_BUCKET)
+      .createSignedUrl(storagePath, expiresIn);
+    if (!adminResult.error && adminResult.data?.signedUrl) {
+      return adminResult.data.signedUrl;
+    }
+    const { status, statusCode } = storageStatus(adminResult.error);
+    if (status !== 404 && statusCode !== 404) {
+      console.warn(`[storage] signed-url ${storagePath} failed`, adminResult.error);
+    }
+  }
+
   try {
     const result = await supabase.storage
       .from(VIDEO_ASSETS_BUCKET)
@@ -186,17 +201,6 @@ export async function createSignedUrl(supabase: SupabaseClient, storagePath: str
     const { data } = result;
     return data.signedUrl;
   } catch {
-    const admin = createStorageAdminClient();
-    if (!admin) return null;
-    const adminResult = await admin.storage
-      .from(VIDEO_ASSETS_BUCKET)
-      .createSignedUrl(storagePath, expiresIn);
-    if (adminResult.error) {
-      const { status, statusCode } = storageStatus(adminResult.error);
-      if (status !== 404 && statusCode !== 404) {
-        console.warn(`[storage] signed-url ${storagePath} failed`, adminResult.error);
-      }
-    }
-    return adminResult.data?.signedUrl ?? null;
+    return null;
   }
 }

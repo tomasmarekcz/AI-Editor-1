@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { AppSidebar } from '@/app/components/layout/AppSidebar';
 import { requireAccountPage } from '@/lib/accounts';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSignedUrl } from '@/lib/storage/videoAssets';
 import { VideosClient } from './VideosClient';
 import type { Project } from '@/lib/projects/types';
@@ -31,6 +32,7 @@ export default async function VideosPage({
   searchParams: { project?: string };
 }) {
   const { supabase, account } = await requireAccountPage();
+  const assetClient = createSupabaseAdminClient() ?? supabase;
 
   const [{ data: videosRaw }, { data: projects }] = await Promise.all([
     supabase
@@ -58,7 +60,7 @@ export default async function VideosPage({
 
   const videoIds = (videosRaw ?? []).map((video) => video.id);
   const { data: previewAssets } = videoIds.length > 0
-    ? await supabase
+    ? await assetClient
       .from('video_assets')
       .select('video_id,kind,storage_path,segment_index,created_at')
       .eq('account_id', account.id)
@@ -81,7 +83,7 @@ export default async function VideosPage({
       ...v,
       project_name: projectNameById[v.project_id] ?? null,
       thumbnailUrl: v.thumbnail_path || previewPathByVideoId[v.id]
-        ? await createSignedUrl(supabase, v.thumbnail_path ?? previewPathByVideoId[v.id], 3600)
+        ? await createSignedUrl(assetClient, v.thumbnail_path ?? previewPathByVideoId[v.id], 3600)
         : null,
     })),
   );

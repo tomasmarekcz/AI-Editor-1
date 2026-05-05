@@ -125,14 +125,17 @@ function glitchOffset(frame: number): number {
 function segmentOpacity(
   frame: number,
   durationInFrames: number,
+  fps: number,
   transition: 'fade' | 'cut' | 'dissolve' = 'fade',
 ): number {
   if (transition === 'cut') return 1;
   if (durationInFrames <= 1) return 1;
 
-  const fadeFrames = transition === 'dissolve'
-    ? Math.min(18, Math.floor(durationInFrames * 0.3))
-    : Math.max(1, Math.min(3, Math.floor(durationInFrames * 0.04), Math.floor((durationInFrames - 1) / 2)));
+  const transitionFrames = Math.max(1, Math.round(fps * 0.15));
+  const fadeFrames = Math.max(
+    1,
+    Math.min(transitionFrames, Math.floor((durationInFrames - 1) / 2)),
+  );
 
   if (durationInFrames <= fadeFrames * 2) {
     return interpolate(frame, [0, durationInFrames / 2, durationInFrames], [0, 1, 0], {
@@ -181,7 +184,7 @@ export const Segment: React.FC<Props> = ({ segment, durationInFrames, index, sub
   const glitchX = effect === 'glitch' ? glitchOffset(frame) : 0;
 
   // ── Segment fade ──────────────────────────────────────────────────────
-  const segOpacity = segmentOpacity(frame, durationInFrames, segment.transition ?? 'fade');
+  const segOpacity = segmentOpacity(frame, durationInFrames, fps, segment.transition ?? 'fade');
 
   // ── Subtitle ──────────────────────────────────────────────────────────
   const { font, allCaps, highlight, chunkSize, color, highlightColor, sizeScale, positionY, animation } = subtitle;

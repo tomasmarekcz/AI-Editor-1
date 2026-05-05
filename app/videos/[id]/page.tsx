@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { AppSidebar } from '@/app/components/layout/AppSidebar';
 import { requireAccountPage } from '@/lib/accounts';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSignedUrl } from '@/lib/storage/videoAssets';
 import { formatUsd } from '@/lib/pricing';
 import { VideoRetryButton } from './VideoRetryButton';
@@ -31,6 +32,8 @@ export default async function VideoDetailPage({ params }: { params: { id: string
     notFound();
   }
 
+  const assetClient = createSupabaseAdminClient() ?? supabase;
+
   const [{ data: project }, { data: assets }, { data: usageEvents }] = await Promise.all([
     supabase
       .from('projects')
@@ -38,13 +41,13 @@ export default async function VideoDetailPage({ params }: { params: { id: string
       .eq('id', video.project_id)
       .eq('account_id', account.id)
       .maybeSingle<Project>(),
-    supabase
+    assetClient
       .from('video_assets')
       .select('*')
       .eq('video_id', video.id)
       .eq('account_id', account.id)
       .order('segment_index', { ascending: true }),
-    supabase
+    assetClient
       .from('usage_events')
       .select('*')
       .eq('video_id', video.id)
@@ -55,12 +58,12 @@ export default async function VideoDetailPage({ params }: { params: { id: string
   const signedAssets = await Promise.all(
     ((assets ?? []) as VideoAsset[]).map(async (asset) => ({
       ...asset,
-      signedUrl: await createSignedUrl(supabase, asset.storage_path),
+      signedUrl: await createSignedUrl(assetClient, asset.storage_path),
     })),
   );
 
   const finalVideoAsset = signedAssets.find((asset) => asset.kind === 'final_video');
-  const finalUrl = (await createSignedUrl(supabase, video.final_video_path)) ?? finalVideoAsset?.signedUrl ?? null;
+  const finalUrl = (await createSignedUrl(assetClient, video.final_video_path)) ?? finalVideoAsset?.signedUrl ?? null;
   const imageAssets = signedAssets.filter((asset) => asset.kind === 'image' || asset.kind === 'uploaded_image');
 
   return (

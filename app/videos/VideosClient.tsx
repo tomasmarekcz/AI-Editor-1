@@ -230,6 +230,7 @@ function VideoCard({ video }: { video: VideoListItem }) {
   const router = useRouter();
   const [isRetrying, setIsRetrying] = useState(false);
   const canRetry = video.status === 'failed' || video.status === 'queued' || video.status === 'done';
+  const detailHref = `/videos/${video.id}`;
 
   async function retryRender() {
     setIsRetrying(true);
@@ -246,7 +247,18 @@ function VideoCard({ video }: { video: VideoListItem }) {
   }
 
   return (
-    <article className="group rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden transition hover:border-gray-700">
+    <article
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(detailHref)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          router.push(detailHref);
+        }
+      }}
+      className="group cursor-pointer rounded-xl border border-gray-800 bg-gray-900/70 overflow-hidden transition hover:border-gray-700 focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
+    >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-gray-950 overflow-hidden">
         {video.thumbnailUrl ? (
@@ -303,7 +315,8 @@ function VideoCard({ video }: { video: VideoListItem }) {
         {/* Actions */}
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Link
-            href={`/videos/${video.id}`}
+            href={detailHref}
+            onClick={(e) => e.stopPropagation()}
             className="min-w-[72px] flex-1 rounded-lg border border-gray-700 py-1.5 text-center text-[11px] font-bold text-gray-300 transition hover:border-cyan-400 hover:text-cyan-200"
           >
             Detail
@@ -312,12 +325,14 @@ function VideoCard({ video }: { video: VideoListItem }) {
             <>
               <Link
                 href={`/videos/${video.id}/publish`}
+                onClick={(e) => e.stopPropagation()}
                 className="min-w-[120px] flex-1 rounded-lg border border-purple-800 bg-purple-500/10 py-1.5 text-center text-[11px] font-bold text-purple-200 transition hover:border-purple-500 hover:bg-purple-500/20"
               >
                 Schedule Publishing
               </Link>
               <Link
                 href={`/videos/${video.id}/edit`}
+                onClick={(e) => e.stopPropagation()}
                 className="min-w-[72px] flex-1 rounded-lg border border-cyan-800 bg-cyan-600/10 py-1.5 text-center text-[11px] font-bold text-cyan-300 transition hover:border-cyan-500 hover:bg-cyan-500/20"
               >
                 ✏️ Edit
@@ -327,7 +342,10 @@ function VideoCard({ video }: { video: VideoListItem }) {
           {canRetry && (
             <button
               type="button"
-              onClick={retryRender}
+              onClick={(e) => {
+                e.stopPropagation();
+                void retryRender();
+              }}
               disabled={isRetrying}
               className="min-w-[96px] flex-1 rounded-lg border border-amber-700 bg-amber-500/10 py-1.5 text-center text-[11px] font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
