@@ -82,6 +82,13 @@ async function ensureVideoBucketLimit(requiredBytes: number) {
   });
 
   if (error) {
+    const { status, statusCode } = storageStatus(error);
+    if (status === 413 || statusCode === 413) {
+      console.warn(
+        `[storage] ${VIDEO_ASSETS_BUCKET} file size limit update was rejected at ${fileSizeLimit} bytes; continuing with the existing bucket limit.`,
+      );
+      return;
+    }
     console.warn(`[storage] Could not update ${VIDEO_ASSETS_BUCKET} file size limit to ${fileSizeLimit} bytes`, error);
   }
 }

@@ -79,6 +79,23 @@ export async function runVideoPipeline({
       metadata,
     });
 
+  const requireDbWrite = async <T>(
+    label: string,
+    query: PromiseLike<{ data?: T | null; error: unknown }>,
+  ) => {
+    const result = await query;
+    if (result.error) {
+      const message = result.error instanceof Error
+        ? result.error.message
+        : typeof result.error === 'object' && result.error && 'message' in result.error
+          ? String((result.error as { message?: unknown }).message)
+          : String(result.error);
+      await logPipeline('db_write_failed', label, { label, error: result.error }, 'error');
+      throw new Error(`${label}: ${message}`);
+    }
+    return result;
+  };
+
   await logPipeline('start', 'Pipeline started.', {
     segments: segments.length,
     imageSource: settings.imageSource,
@@ -335,7 +352,7 @@ export async function runVideoPipeline({
     folder: 'audio',
     localPath: audioAbsPath,
   });
-  await supabase.from('video_assets').insert({
+  await requireDbWrite('Audio asset DB insert failed', supabase.from('video_assets').insert({
     user_id: userId,
     account_id: accountId,
     project_id: projectId,
@@ -347,7 +364,7 @@ export async function runVideoPipeline({
     size_bytes: audioAsset.sizeBytes,
     source: settings.ttsProvider,
     metadata: { audioRelPath },
-  });
+  }));
   const ttsText = processed.map((s) => s.audioText ?? s.text).join('\n\n');
   const ttsMinutes = Math.max(1 / 60, audioDurationSeconds / 60);
   if (settings.ttsProvider === 'gemini') {
@@ -411,7 +428,7 @@ export async function runVideoPipeline({
     buffer: Buffer.from(JSON.stringify(subtitlesJson, null, 2), 'utf8'),
     contentType: 'application/json',
   });
-  await supabase.from('video_assets').insert({
+  await requireDbWrite('Subtitles asset DB insert failed', supabase.from('video_assets').insert({
     user_id: userId,
     account_id: accountId,
     project_id: projectId,
@@ -422,7 +439,7 @@ export async function runVideoPipeline({
     mime_type: subtitlesAsset.mimeType,
     size_bytes: subtitlesAsset.sizeBytes,
     metadata: { format: 'segments-json' },
-  });
+  }));
 
   await supabase
     .from('videos')
@@ -553,7 +570,7 @@ export async function runVideoPipeline({
     });
   }
   if (imageAssetRows.length > 0) {
-    await supabase.from('video_assets').insert(imageAssetRows);
+    await requireDbWrite('Image assets DB insert failed', supabase.from('video_assets').insert(imageAssetRows));
   }
 
   let thumbnailPath: string | null = null;
@@ -570,7 +587,7 @@ export async function runVideoPipeline({
         filename: `thumbnail${path.extname(firstImage) || '.jpg'}`,
       });
       thumbnailPath = thumbAsset.storagePath;
-      await supabase.from('video_assets').insert({
+      await requireDbWrite('Thumbnail asset DB insert failed', supabase.from('video_assets').insert({
         user_id: userId,
         account_id: accountId,
         project_id: projectId,
@@ -582,7 +599,7 @@ export async function runVideoPipeline({
         size_bytes: thumbAsset.sizeBytes,
         source: 'first_image',
         metadata: {},
-      });
+      }));
     } catch (thumbErr) {
       console.warn('[asset thumbnail]', thumbErr);
       await logPipeline('thumbnail_failed', 'Thumbnail upload failed.', { thumbErr }, 'warn');
@@ -603,7 +620,7 @@ export async function runVideoPipeline({
     sizeBytes: finalAsset.sizeBytes,
     mimeType: finalAsset.mimeType,
   });
-  await supabase.from('video_assets').insert({
+  await requireDbWrite('Final video asset DB insert failed', supabase.from('video_assets').insert({
     user_id: userId,
     account_id: accountId,
     project_id: projectId,
@@ -614,7 +631,7 @@ export async function runVideoPipeline({
     mime_type: finalAsset.mimeType,
     size_bytes: finalAsset.sizeBytes,
     metadata: { localVideoUrl: videoUrl },
-  });
+  }));
 
   const finalSignedUrl = await createSignedUrl(supabase, finalAsset.storagePath);
   const durationSeconds = processed.reduce((sum, seg) => sum + (seg.audioDuration ?? seg.duration ?? 0), 0);
@@ -627,11 +644,11 @@ export async function runVideoPipeline({
     lines: actualCostLines,
     estimated: false,
   });
-  const { data: allActualEvents } = await supabase
+  const { data: allActualEvents } = await requireDbWrite('Actual usage events DB select failed', supabase
     .from('usage_events')
     .select('provider,model,step,usage,cost_usd')
     .eq('video_id', videoId)
-    .eq('estimated', false);
+    .eq('estimated', false));
   const allActualLines: CostLine[] = (allActualEvents ?? []).map((event) => ({
     provider: String(event.provider),
     model: event.model ? String(event.model) : undefined,
@@ -640,7 +657,7 @@ export async function runVideoPipeline({
     costUsd: Number(event.cost_usd ?? 0),
   }));
   const actualCostUsd = roundCost(allActualLines.reduce((sum, line) => sum + line.costUsd, 0));
-  await supabase
+  const { data: finalVideoRow } = await requireDbWrite('Final video DB update failed', supabase
     .from('videos')
     .update({
       status: 'done',
@@ -665,12 +682,15 @@ export async function runVideoPipeline({
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', videoId);
+    .eq('id', videoId)
+    .select('id,status,current_step,final_video_path,thumbnail_path,final_video_size_bytes,completed_at')
+    .single());
 
   await logPipeline('done', 'Pipeline completed.', {
     durationSeconds,
     actualCostUsd,
     finalVideoPath: finalAsset.storagePath,
+    finalVideoRow,
   });
 
   send({ type: 'done', videoUrl: finalSignedUrl ?? videoUrl, videoId });
