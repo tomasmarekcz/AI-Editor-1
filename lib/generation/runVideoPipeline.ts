@@ -430,13 +430,31 @@ export async function runVideoPipeline({
     .eq('id', videoId);
   send({ type: 'step', step: 'rendering', message: 'Renderuji video...' });
 
-  const videoUrl = await renderVideo(processed, videoId, settings, audioRelPath, (pct) => {
-    send({ type: 'render_progress', progress: pct });
-    void supabase
+  let videoUrl: string;
+  try {
+    videoUrl = await renderVideo(processed, videoId, settings, audioRelPath, (pct) => {
+      send({ type: 'render_progress', progress: pct });
+      void supabase
+        .from('videos')
+        .update({ render_progress: pct, updated_at: new Date().toISOString() })
+        .eq('id', videoId);
+    });
+  } catch (renderErr) {
+    const message = renderErr instanceof Error ? renderErr.message : String(renderErr);
+    await logPipeline('render_failed', 'Remotion render failed.', { message, renderErr }, 'error');
+    await supabase
       .from('videos')
-      .update({ render_progress: pct, updated_at: new Date().toISOString() })
+      .update({
+        status: 'failed',
+        current_step: 'failed',
+        error_message: message,
+        last_worker_error: message,
+        locked_at: null,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', videoId);
-  });
+    throw renderErr;
+  }
   await logPipeline('render_ready', 'Remotion render finished.', { videoUrl });
 
   await supabase

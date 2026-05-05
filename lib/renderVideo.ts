@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { pathToFileURL } from 'url';
+import http from 'http';
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
 import type { SegmentData, SubtitleSettings, VideoSettings, VideoInputProps } from '@/types';
@@ -9,6 +9,7 @@ type RenderBitrate = `${number}k` | `${number}K` | `${number}M`;
 type X264Preset = 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow' | 'placebo';
 
 let cachedBundle: string | null = null;
+let assetServerPromise: Promise<string> | null = null;
 
 const DEFAULT_SUBTITLE: SubtitleSettings = {
   font: 'Arial Black',
@@ -48,6 +49,69 @@ const publicRelPathToAbsPath = (relPath: string): string => {
   return path.join(process.cwd(), 'public', relPath.startsWith('/') ? relPath.slice(1) : relPath);
 };
 
+const mimeFromPath = (filePath: string): string => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.aac') return 'audio/aac';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.m4a') return 'audio/mp4';
+  if (ext === '.mp4') return 'video/mp4';
+  return ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'application/octet-stream';
+};
+
+const startAssetServer = async (): Promise<string> => {
+  if (assetServerPromise) return assetServerPromise;
+
+  assetServerPromise = new Promise((resolve, reject) => {
+    const publicDir = path.join(process.cwd(), 'public');
+    const server = http.createServer((req, res) => {
+      try {
+        const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+        const decodedPath = decodeURIComponent(requestUrl.pathname);
+        const absPath = path.resolve(publicDir, decodedPath.replace(/^\/+/, ''));
+
+        if (!absPath.startsWith(publicDir + path.sep)) {
+          res.writeHead(403);
+          res.end('Forbidden');
+          return;
+        }
+
+        if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
+          res.writeHead(404);
+          res.end('Not found');
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': mimeFromPath(absPath),
+          'Cache-Control': 'no-store',
+        });
+        fs.createReadStream(absPath).pipe(res);
+      } catch (err) {
+        res.writeHead(500);
+        res.end(err instanceof Error ? err.message : 'Internal error');
+      }
+    });
+
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Could not start local asset server.'));
+        return;
+      }
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+      console.log('[render] local asset server started', { baseUrl });
+      resolve(baseUrl);
+    });
+  });
+
+  return assetServerPromise;
+};
+
 const normalizeSubtitle = (subtitle: VideoSettings['subtitle'] | undefined): SubtitleSettings => ({
   ...DEFAULT_SUBTITLE,
   ...(subtitle ?? {}),
@@ -83,13 +147,14 @@ export async function renderVideo(
   }
 
   const baseUrl = process.env.BASE_URL ?? 'http://localhost:3000';
+  const localAssetBaseUrl = await startAssetServer();
 
   const resolvedSegments: SegmentData[] = segments.map((seg) => {
     let imageUrl: string | undefined;
     if (seg.localImagePath) {
       const absPath = publicRelPathToAbsPath(seg.localImagePath);
       if (fs.existsSync(absPath) && fs.statSync(absPath).size > 1024) {
-        imageUrl = pathToFileURL(absPath).href;
+        imageUrl = `${localAssetBaseUrl}${seg.localImagePath}`;
       } else if (seg.imageUrl?.startsWith('http')) {
         imageUrl = seg.imageUrl;
       }
@@ -108,7 +173,7 @@ export async function renderVideo(
   if (audioRelPath) {
     const audioAbsPath = publicRelPathToAbsPath(audioRelPath);
     audioUrl = fs.existsSync(audioAbsPath)
-      ? pathToFileURL(audioAbsPath).href
+      ? `${localAssetBaseUrl}${audioRelPath}`
       : `${baseUrl}/api/audio?path=${encodeURIComponent(audioRelPath)}`;
   }
 
