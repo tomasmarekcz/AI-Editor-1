@@ -59,7 +59,8 @@ export default async function VideoDetailPage({ params }: { params: { id: string
     })),
   );
 
-  const finalUrl = await createSignedUrl(supabase, video.final_video_path);
+  const finalVideoAsset = signedAssets.find((asset) => asset.kind === 'final_video');
+  const finalUrl = (await createSignedUrl(supabase, video.final_video_path)) ?? finalVideoAsset?.signedUrl ?? null;
   const imageAssets = signedAssets.filter((asset) => asset.kind === 'image' || asset.kind === 'uploaded_image');
 
   return (

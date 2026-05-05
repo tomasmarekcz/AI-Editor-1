@@ -56,12 +56,32 @@ export default async function VideosPage({
     projectNameById[p.id] = p.name;
   }
 
+  const videoIds = (videosRaw ?? []).map((video) => video.id);
+  const { data: previewAssets } = videoIds.length > 0
+    ? await supabase
+      .from('video_assets')
+      .select('video_id,kind,storage_path,segment_index,created_at')
+      .eq('account_id', account.id)
+      .in('video_id', videoIds)
+      .in('kind', ['thumbnail', 'image', 'uploaded_image'])
+      .order('segment_index', { ascending: true })
+      .order('created_at', { ascending: false })
+    : { data: [] };
+
+  const previewPathByVideoId: Record<string, string> = {};
+  for (const asset of previewAssets ?? []) {
+    const videoId = String(asset.video_id);
+    if (asset.kind === 'thumbnail' || !previewPathByVideoId[videoId]) {
+      previewPathByVideoId[videoId] = String(asset.storage_path);
+    }
+  }
+
   const videos: VideoListItem[] = await Promise.all(
     (videosRaw ?? []).map(async (v) => ({
       ...v,
       project_name: projectNameById[v.project_id] ?? null,
-      thumbnailUrl: v.thumbnail_path
-        ? await createSignedUrl(supabase, v.thumbnail_path, 3600)
+      thumbnailUrl: v.thumbnail_path || previewPathByVideoId[v.id]
+        ? await createSignedUrl(supabase, v.thumbnail_path ?? previewPathByVideoId[v.id], 3600)
         : null,
     })),
   );

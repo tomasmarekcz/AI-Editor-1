@@ -12,7 +12,13 @@ import { generateVoiceoverFull } from '@/lib/generateVoiceoverFull';
 import { transcribeAudio } from '@/lib/transcribeAudio';
 import { mapSTTToSegments } from '@/lib/mapSTTToSegments';
 import { renderVideo } from '@/lib/renderVideo';
-import { createSignedUrl, uploadBufferAsset, uploadLocalAsset, VIDEO_ASSETS_BUCKET } from '@/lib/storage/videoAssets';
+import {
+  createSignedUrl,
+  createStorageAdminClient,
+  uploadBufferAsset,
+  uploadLocalAsset,
+  VIDEO_ASSETS_BUCKET,
+} from '@/lib/storage/videoAssets';
 import { costGeminiText, costOpenAIText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { generateEffects } from '@/lib/generateEffects';
@@ -48,6 +54,32 @@ const localImageExists = (localImagePath: string | undefined): boolean => {
     return false;
   }
 };
+
+async function downloadStorageImageToTmp(
+  supabase: SupabaseClient,
+  storagePath: string,
+  videoId: string,
+  index: number,
+) {
+  const primary = await supabase.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
+  let blob = primary.data;
+
+  if (primary.error || !blob) {
+    const admin = createStorageAdminClient();
+    if (!admin) throw primary.error ?? new Error(`Could not download ${storagePath}`);
+    const fallback = await admin.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
+    if (fallback.error || !fallback.data) throw fallback.error ?? new Error(`Could not download ${storagePath}`);
+    blob = fallback.data;
+  }
+
+  const ext = path.extname(storagePath).toLowerCase() || '.jpg';
+  const dir = path.join(process.cwd(), 'public', 'tmp', 'images');
+  fs.mkdirSync(dir, { recursive: true });
+  const filename = `reused_${videoId}_${String(index + 1).padStart(2, '0')}${ext}`;
+  const absPath = path.join(dir, filename);
+  fs.writeFileSync(absPath, Buffer.from(await blob.arrayBuffer()));
+  return `/tmp/images/${filename}`;
+}
 
 export async function runVideoPipeline({
   supabase,
@@ -121,6 +153,59 @@ export async function runVideoPipeline({
       ? { ...segment, localImagePath: undefined, imageUrl: undefined }
       : { ...segment }
   ));
+  const newlyCreatedImageIndexes = new Set<number>();
+  const restoredImageIndexes = new Set<number>();
+
+  const existingImageAssets = await supabase
+    .from('video_assets')
+    .select('segment_index,segment_id,storage_path,prompt,source')
+    .eq('video_id', videoId)
+    .eq('account_id', accountId)
+    .in('kind', ['image', 'uploaded_image'])
+    .order('created_at', { ascending: false });
+
+  if (existingImageAssets.error) {
+    await logPipeline('existing_images_lookup_failed', 'Could not look up existing image assets; may regenerate missing images.', {
+      error: existingImageAssets.error,
+    }, 'warn');
+  } else {
+    const usedIndexes = new Set<number>();
+    for (const asset of existingImageAssets.data ?? []) {
+      const index = typeof asset.segment_index === 'number'
+        ? asset.segment_index
+        : processed.findIndex((segment) => asset.segment_id && segment.id === asset.segment_id);
+      if (index < 0 || index >= processed.length || usedIndexes.has(index) || localImageExists(processed[index].localImagePath)) {
+        continue;
+      }
+
+      try {
+        const localImagePath = await downloadStorageImageToTmp(supabase, String(asset.storage_path), videoId, index);
+        processed[index] = {
+          ...processed[index],
+          localImagePath,
+          imageUrl: localImagePath,
+          imagePrompt: processed[index].imagePrompt ?? (asset.prompt ? String(asset.prompt) : undefined),
+          imageGenMode: processed[index].imageGenMode ?? (asset.source === 'imagen' ? 'imagen' : asset.source === 'google' ? 'google' : undefined),
+        };
+        usedIndexes.add(index);
+        restoredImageIndexes.add(index);
+      } catch (err) {
+        await logPipeline('existing_image_restore_failed', `Could not restore image ${index} from storage; it may be regenerated.`, {
+          index,
+          storagePath: asset.storage_path,
+          err,
+        }, 'warn');
+      }
+    }
+
+    if (usedIndexes.size > 0) {
+      await logPipeline('existing_images_restored', 'Reused existing image assets from Supabase Storage.', {
+        restoredImages: usedIndexes.size,
+        totalSegments: processed.length,
+      });
+    }
+  }
+
   const actualCostLines: CostLine[] = (scriptGenerationCostLines ?? [])
     .filter((line) => line.step === 'script_generation')
     .slice(0, 1);
@@ -253,6 +338,7 @@ export async function runVideoPipeline({
               imagePrompt: currentPrompt,
               imageGenMode: usedMode,
             };
+            if (localImagePath) newlyCreatedImageIndexes.add(i);
             send({ type: 'image_ready', index: i, imageUrl: localImagePath ?? '' });
             await logPipeline('image_ready', `Image ${i} ready.`, {
               index: i,
@@ -482,6 +568,7 @@ export async function runVideoPipeline({
   const imageAssetRows = [];
   for (const [index, seg] of processed.entries()) {
     if (!seg.localImagePath) continue;
+    if (restoredImageIndexes.has(index)) continue;
     if (!localImageExists(seg.localImagePath)) {
       await logPipeline('asset_image_missing', `Image asset ${index} local file is missing; skipping asset upload.`, {
         index,
@@ -519,8 +606,9 @@ export async function runVideoPipeline({
           localImagePath: seg.localImagePath,
         },
       });
-      usage.generatedImages += 1;
-      if (seg.imageGenMode === 'imagen') usage.imagenImages += 1;
+      if (newlyCreatedImageIndexes.has(index)) {
+        usage.generatedImages += 1;
+      }
     } catch (assetErr) {
       console.warn(`[asset image ${index}]`, assetErr);
       await logPipeline('asset_image_failed', `Image asset ${index} upload failed.`, { index, assetErr }, 'warn');
