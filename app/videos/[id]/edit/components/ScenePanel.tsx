@@ -8,6 +8,8 @@ interface Props {
   segment: SegmentData & { _removed?: boolean };
   segmentIdx: number;
   totalSegments: number;
+  videoId: string;
+  projectId: string;
   imageUrl: string | undefined;
   previewImageUrl: string | undefined;
   orientation: string;
@@ -15,7 +17,7 @@ interface Props {
   onMoveLeft: () => void;
   onMoveRight: () => void;
   onDuplicate: () => void;
-  onImageRegenerated: (idx: number, localPath: string) => void;
+  onImageRegenerated: (idx: number, localPath: string, prompt: string, mode: SegmentData['imageGenMode']) => void;
 }
 
 const EFFECTS: { value: VideoEffect; label: string; icon: string; color: string }[] = [
@@ -44,6 +46,8 @@ export function ScenePanel({
   segment,
   segmentIdx,
   totalSegments,
+  videoId,
+  projectId,
   imageUrl,
   previewImageUrl,
   orientation,
@@ -76,27 +80,27 @@ export function ScenePanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           segmentId: segment.id,
+          videoId,
+          projectId,
           prompt: imagePrompt.trim(),
           mode: segment.imageGenMode ?? 'google',
           orientation: orientation ?? 'vertical',
         }),
       });
-      const data = await res.json() as { localImagePath?: string; error?: string };
+      const data = await res.json() as { localImagePath?: string; usedMode?: SegmentData['imageGenMode']; error?: string };
       if (!res.ok || data.error) {
         setRegenError(data.error ?? 'Regenerace selhala');
         return;
       }
       if (data.localImagePath) {
-        onImageRegenerated(segmentIdx, data.localImagePath);
-        // Also mark for re-render
-        onPatch({ scenes: { [segmentIdx]: { newImagePrompt: imagePrompt.trim() } } });
+        onImageRegenerated(segmentIdx, data.localImagePath, imagePrompt.trim(), data.usedMode ?? segment.imageGenMode ?? 'google');
       }
     } catch (err) {
       setRegenError(err instanceof Error ? err.message : 'Chyba sítě');
     } finally {
       setIsRegenerating(false);
     }
-  }, [imagePrompt, segment, orientation, segmentIdx, onPatch, onImageRegenerated]);
+  }, [imagePrompt, segment, videoId, projectId, orientation, segmentIdx, onImageRegenerated]);
 
   const thumbUrl = previewImageUrl ?? imageUrl;
   const aspectClass = orientation === 'horizontal' ? 'aspect-video' : 'aspect-[9/16]';

@@ -216,6 +216,14 @@ export function estimateVideoCost(
       usage: { estimatedCharacters: script.length, estimatedAudioSeconds: audioSeconds },
       costUsd: roundCost(audioMinutes * PRICING.google['gemini-2.5-flash-preview-tts'].estimatedUsdPerMinute),
     });
+  } else if (settings.ttsProvider === 'elevenlabs') {
+    lines.push({
+      provider: 'elevenlabs',
+      model: 'eleven_multilingual_v2',
+      step: 'tts',
+      usage: { estimatedCharacters: script.length, estimatedAudioSeconds: audioSeconds },
+      costUsd: roundCost((script.length / 1_000) * PRICING.elevenlabs.eleven_multilingual_v2.usdPer1KCharacters),
+    });
   } else {
     const model = settings.voicePreset === 'custom' ? 'gpt-4o-mini-tts' : settings.hdQuality ? 'tts-1-hd' : 'tts-1';
     const costUsd = model === 'gpt-4o-mini-tts'

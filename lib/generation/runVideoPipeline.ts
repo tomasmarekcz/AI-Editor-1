@@ -132,6 +132,14 @@ export async function runVideoPipeline({
     segments: segments.length,
     imageSource: settings.imageSource,
     ttsProvider: settings.ttsProvider,
+    openaiVoice: settings.voice,
+    openaiPreset: settings.voicePreset,
+    openaiSpeed: settings.speed,
+    openaiHdQuality: settings.hdQuality,
+    geminiVoice: settings.geminiVoice,
+    geminiPreset: settings.geminiPreset,
+    elevenLabsPreset: settings.elevenLabsPreset,
+    elevenLabsCustomVoiceIdSet: Boolean(settings.elevenLabsCustomVoiceId),
     orientation: settings.orientation,
   });
 
@@ -212,6 +220,7 @@ export async function runVideoPipeline({
   const usage: Record<string, number> = {
     generatedImages: 0,
     regeneratedImages: 0,
+    imageReviews: 0,
     serperQueries: 0,
     googleImageSelections: 0,
     imagenImages: 0,
@@ -309,6 +318,7 @@ export async function runVideoPipeline({
               }
 
               try {
+                usage.imageReviews += 1;
                 const review = await reviewImage(
                   localImagePath,
                   seg.text,
@@ -415,20 +425,41 @@ export async function runVideoPipeline({
     costUsd: costGeminiText(enhancedInputTokens, enhancedOutputTokens),
   });
 
-  const providerLabel = settings.ttsProvider === 'gemini' ? 'Gemini TTS' : 'OpenAI TTS';
+  const providerLabel =
+    settings.ttsProvider === 'gemini'
+      ? 'Gemini TTS'
+      : settings.ttsProvider === 'elevenlabs'
+        ? 'ElevenLabs'
+        : 'OpenAI TTS';
   await supabase
     .from('videos')
     .update({ status: 'generating_voice', current_step: 'generating_voice', updated_at: new Date().toISOString() })
     .eq('id', videoId);
   send({ type: 'step', step: 'tts', message: `Generuji voiceover (${providerLabel})...` });
 
-  const { audioRelPath, audioAbsPath } = await generateVoiceoverFull(
+  const { audioRelPath, audioAbsPath, duration: measuredAudioDurationSeconds } = await generateVoiceoverFull(
     processed.map((s) => s.audioText ?? s.text),
     videoId,
     settings,
   );
-  const audioDurationSeconds = processed.reduce((sum, segment) => sum + (segment.audioDuration ?? segment.duration ?? 0), 0);
-  await logPipeline('voice_ready', 'Voiceover generated.', { audioRelPath, audioDurationSeconds });
+  const audioDurationSeconds = measuredAudioDurationSeconds;
+  await logPipeline('voice_ready', 'Voiceover generated.', {
+    audioRelPath,
+    audioDurationSeconds,
+    ttsProvider: settings.ttsProvider,
+    voice:
+      settings.ttsProvider === 'gemini'
+        ? settings.geminiVoice
+        : settings.ttsProvider === 'elevenlabs'
+          ? settings.elevenLabsPreset
+          : settings.voice,
+    preset:
+      settings.ttsProvider === 'gemini'
+        ? settings.geminiPreset
+        : settings.ttsProvider === 'elevenlabs'
+          ? settings.elevenLabsPreset
+          : settings.voicePreset,
+  });
 
   const audioAsset = await uploadLocalAsset({
     supabase,
@@ -449,7 +480,18 @@ export async function runVideoPipeline({
     mime_type: audioAsset.mimeType,
     size_bytes: audioAsset.sizeBytes,
     source: settings.ttsProvider,
-    metadata: { audioRelPath },
+    metadata: {
+      audioRelPath,
+      provider: settings.ttsProvider,
+      openaiVoice: settings.voice,
+      openaiPreset: settings.voicePreset,
+      openaiSpeed: settings.speed,
+      openaiHdQuality: settings.hdQuality,
+      geminiVoice: settings.geminiVoice,
+      geminiPreset: settings.geminiPreset,
+      elevenLabsPreset: settings.elevenLabsPreset,
+      elevenLabsCustomVoiceId: settings.elevenLabsCustomVoiceId ? '[set]' : '',
+    },
   }));
   const ttsText = processed.map((s) => s.audioText ?? s.text).join('\n\n');
   const ttsMinutes = Math.max(1 / 60, audioDurationSeconds / 60);
@@ -460,6 +502,14 @@ export async function runVideoPipeline({
       step: 'tts',
       usage: { characters: ttsText.length, audioSeconds: audioDurationSeconds },
       costUsd: roundCost(ttsMinutes * PRICING.google['gemini-2.5-flash-preview-tts'].estimatedUsdPerMinute),
+    });
+  } else if (settings.ttsProvider === 'elevenlabs') {
+    actualCostLines.push({
+      provider: 'elevenlabs',
+      model: 'eleven_multilingual_v2',
+      step: 'tts',
+      usage: { characters: ttsText.length, audioSeconds: audioDurationSeconds },
+      costUsd: roundCost((ttsText.length / 1_000) * PRICING.elevenlabs.eleven_multilingual_v2.usdPer1KCharacters),
     });
   } else {
     const model = settings.voicePreset === 'custom' ? 'gpt-4o-mini-tts' : settings.hdQuality ? 'tts-1-hd' : 'tts-1';
@@ -606,7 +656,7 @@ export async function runVideoPipeline({
           localImagePath: seg.localImagePath,
         },
       });
-      if (newlyCreatedImageIndexes.has(index)) {
+      if (newlyCreatedImageIndexes.has(index) && seg.imageGenMode === 'imagen') {
         usage.generatedImages += 1;
       }
     } catch (assetErr) {
@@ -644,17 +694,17 @@ export async function runVideoPipeline({
       costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
     });
   }
-  if (usage.generatedImages > 0) {
+  if (usage.imageReviews > 0) {
     actualCostLines.push({
       provider: 'google',
       model: 'gemini-2.5-flash-lite',
       step: 'image_review',
       usage: {
-        estimatedReviews: usage.generatedImages,
-        estimatedInputTokens: usage.generatedImages * 450,
-        estimatedOutputTokens: usage.generatedImages * 50,
+        estimatedReviews: usage.imageReviews,
+        estimatedInputTokens: usage.imageReviews * 450,
+        estimatedOutputTokens: usage.imageReviews * 50,
       },
-      costUsd: costGeminiText(usage.generatedImages * 450, usage.generatedImages * 50),
+      costUsd: costGeminiText(usage.imageReviews * 450, usage.imageReviews * 50),
     });
   }
   if (imageAssetRows.length > 0) {

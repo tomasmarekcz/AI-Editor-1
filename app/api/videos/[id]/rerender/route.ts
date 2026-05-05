@@ -16,6 +16,8 @@ import { generateWithImagen } from '@/lib/generateWithImagen';
 import { rankGoogleImageCandidates } from '@/lib/selectGoogleImageCandidate';
 import { enforceGenerationGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
+import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
+import { costGeminiText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
 import type { SegmentData, VideoSettings, ImageGenMode } from '@/types';
 
 export const maxDuration = 300;
@@ -30,6 +32,21 @@ async function downloadVideoAsset(supabase: SupabaseClient, storagePath: string)
   const fallback = await admin.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
   return fallback.data ?? null;
 }
+
+const publicLocalPathToAbsolute = (localPath: string): string => {
+  const normalized = localPath.startsWith('/') ? localPath.slice(1) : localPath;
+  return path.join(process.cwd(), 'public', normalized);
+};
+
+const localImageExists = (localImagePath: string | undefined): boolean => {
+  if (!localImagePath) return false;
+  try {
+    const stat = fs.statSync(publicLocalPathToAbsolute(localImagePath));
+    return stat.isFile() && stat.size > 1024;
+  } catch {
+    return false;
+  }
+};
 
 type RenderEvent =
   | { type: 'step'; message: string }
@@ -122,6 +139,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         const fullScript = segments.map((segment) => segment.text).join(' ');
 
         const resolvedSegments: SegmentData[] = [];
+        const usage = {
+          regeneratedImages: 0,
+          imagenImages: 0,
+          serperQueries: 0,
+          googleImageSelections: 0,
+        };
 
         for (let i = 0; i < segments.length; i++) {
           const seg = segments[i];
@@ -131,27 +154,53 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
           let localImagePath: string | undefined;
 
-          if ((seg as SegmentData & { _regenerateImage?: boolean })._regenerateImage && seg.imagePrompt) {
+          if (localImageExists(seg.localImagePath)) {
+            localImagePath = seg.localImagePath;
+          } else if ((seg as SegmentData & { _regenerateImage?: boolean })._regenerateImage && seg.imagePrompt) {
             // Regenerate image
             send({ type: 'step', message: `Regeneruji obrázek pro scénu ${i + 1}...` });
             const fileId = `${seg.id}_r${Date.now()}`;
-            const mode: ImageGenMode = (seg.imageGenMode ?? settings.imageSource as ImageGenMode) === 'imagen' ? 'imagen' : 'google';
+            let mode: ImageGenMode = (seg.imageGenMode ?? settings.imageSource as ImageGenMode) === 'imagen' ? 'imagen' : 'google';
             try {
               if (mode === 'imagen') {
                 localImagePath = await generateWithImagen(seg.imagePrompt, fileId, settings.orientation ?? 'vertical');
+                usage.imagenImages += 1;
               } else {
                 const candidates = await searchImageCandidateDetails(seg.imagePrompt, 10);
+                usage.serperQueries += 1;
                 const ranked = await rankGoogleImageCandidates(
                   candidates,
                   seg.text,
                   fullScript,
                   settings.orientation ?? 'vertical',
                 );
+                usage.googleImageSelections += 1;
                 localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), fileId);
               }
-            } catch {
-              // Fallback: use existing image
-              localImagePath = undefined;
+              usage.regeneratedImages += 1;
+            } catch (err) {
+              if (mode === 'imagen') {
+                try {
+                  mode = 'google';
+                  const googleQuery = seg.keywords || seg.text.slice(0, 80);
+                  const candidates = await searchImageCandidateDetails(googleQuery, 10);
+                  usage.serperQueries += 1;
+                  const ranked = await rankGoogleImageCandidates(
+                    candidates,
+                    seg.text,
+                    fullScript,
+                    settings.orientation ?? 'vertical',
+                  );
+                  usage.googleImageSelections += 1;
+                  localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), fileId);
+                  usage.regeneratedImages += 1;
+                } catch {
+                  localImagePath = undefined;
+                }
+              } else {
+                console.warn('[rerender image]', err);
+                localImagePath = undefined;
+              }
             }
           }
 
@@ -223,10 +272,76 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         await supabase
           .from('videos')
           .update({
+            edited_segments: resolvedSegments,
             edited_video_path: editedAsset.storagePath,
             edited_video_size_bytes: editedAsset.sizeBytes,
+            regenerated_images_count: usage.regeneratedImages,
+            serper_queries_count: usage.serperQueries,
           })
           .eq('id', videoId);
+
+        const costLines: CostLine[] = [];
+        if (usage.serperQueries > 0) {
+          costLines.push({
+            provider: 'serper',
+            step: 'image_search',
+            usage: { queries: usage.serperQueries },
+            costUsd: roundCost(usage.serperQueries * PRICING.serper.imagesSearchUsdPerQuery),
+          });
+        }
+        if (usage.googleImageSelections > 0) {
+          costLines.push({
+            provider: 'google',
+            model: 'gemini-2.5-flash-lite',
+            step: 'image_selection',
+            usage: {
+              estimatedSelections: usage.googleImageSelections,
+              estimatedInputTokens: usage.googleImageSelections * 900,
+              estimatedOutputTokens: usage.googleImageSelections * 40,
+            },
+            costUsd: costGeminiText(usage.googleImageSelections * 900, usage.googleImageSelections * 40),
+          });
+        }
+        if (usage.imagenImages > 0) {
+          costLines.push({
+            provider: 'google',
+            model: 'imagen-4.0-generate-001',
+            step: 'image_generation',
+            usage: { images: usage.imagenImages },
+            costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+          });
+        }
+        await insertUsageEvents({
+          supabase,
+          userId: user.id,
+          accountId: account.id,
+          projectId,
+          videoId,
+          lines: costLines,
+          estimated: false,
+        });
+        if (costLines.length > 0) {
+          const { data: actualEvents } = await supabase
+            .from('usage_events')
+            .select('provider,model,step,usage,cost_usd')
+            .eq('video_id', videoId)
+            .eq('estimated', false);
+          const allActualLines: CostLine[] = (actualEvents ?? []).map((event) => ({
+            provider: String(event.provider),
+            model: event.model ? String(event.model) : undefined,
+            step: String(event.step),
+            usage: (event.usage ?? {}) as Record<string, number | string | boolean>,
+            costUsd: Number(event.cost_usd ?? 0),
+          }));
+          await supabase
+            .from('videos')
+            .update({
+              actual_cost_usd: roundCost(allActualLines.reduce((sum, line) => sum + line.costUsd, 0)),
+              cost_breakdown: { actual: summarizeCostLines(allActualLines) },
+            })
+            .eq('id', videoId)
+            .eq('account_id', account.id);
+        }
 
         const signedUrl = await createSignedUrl(supabase, editedAsset.storagePath, 14400);
         send({ type: 'done', videoUrl: signedUrl ?? '' });

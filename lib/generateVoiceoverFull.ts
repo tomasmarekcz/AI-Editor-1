@@ -5,6 +5,7 @@ import { execSync } from 'child_process';
 import type { VideoSettings } from '@/types';
 import { VOICE_PRESETS } from './voicePresets';
 import { GEMINI_TTS_PRESETS } from './geminiTtsPresets';
+import { ELEVENLABS_PRESETS, ELEVENLABS_VOICE_ID } from './elevenLabsPresets';
 
 const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 
@@ -48,8 +49,9 @@ export async function generateVoiceoverFull(
 
   if (settings.ttsProvider === 'gemini') {
     await generateGeminiVoiceover(fullText, absPath, settings);
+  } else if (settings.ttsProvider === 'elevenlabs') {
+    await generateElevenLabsVoiceover(fullText, absPath, settings);
   } else {
-    // openai or elevenlabs-fallback → use OpenAI
     await generateOpenAIVoiceover(fullText, absPath, settings);
   }
 
@@ -58,6 +60,48 @@ export async function generateVoiceoverFull(
   const duration = measured ?? fallback;
 
   return { audioRelPath: relPath, audioAbsPath: absPath, duration };
+}
+
+// ── ElevenLabs TTS ─────────────────────────────────────────────────────────
+async function generateElevenLabsVoiceover(
+  text: string,
+  outputPath: string,
+  settings: VideoSettings,
+): Promise<void> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) throw new Error('ELEVENLABS_API_KEY is not set');
+
+  const presetDef = ELEVENLABS_PRESETS[settings.elevenLabsPreset];
+  const voiceId =
+    settings.elevenLabsPreset === 'custom' && settings.elevenLabsCustomVoiceId.trim()
+      ? settings.elevenLabsCustomVoiceId.trim()
+      : ELEVENLABS_VOICE_ID;
+
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'audio/mpeg',
+    },
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_multilingual_v2',
+      voice_settings: {
+        stability: presetDef.stability,
+        similarity_boost: presetDef.similarity_boost,
+        style: presetDef.style,
+        use_speaker_boost: presetDef.use_speaker_boost,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`ElevenLabs API error ${res.status}: ${body.slice(0, 300)}`);
+  }
+
+  fs.writeFileSync(outputPath, Buffer.from(await res.arrayBuffer()));
 }
 
 // ── OpenAI TTS ──────────────────────────────────────────────────────────────

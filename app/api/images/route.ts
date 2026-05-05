@@ -61,7 +61,7 @@ export async function POST(req: Request) {
 
       try {
         const costLines: CostLine[] = [];
-        const usage = { serperQueries: 0, imagenImages: 0, generatedImages: 0, googleImageSelections: 0 };
+        const usage = { serperQueries: 0, imagenImages: 0, generatedImages: 0, googleImageSelections: 0, imageReviews: 0 };
         const source = settings.imageSource as Exclude<ImageSource, 'upload'>;
 
         // ── Step 1: Gemini generates search queries / image prompts ──────────
@@ -151,6 +151,7 @@ export async function POST(req: Request) {
                   send({ type: 'reviewing', index: i, attempt: attempt + 1 });
 
                   try {
+                    usage.imageReviews += 1;
                     const review = await reviewImage(
                       localImagePath,
                       seg.text,
@@ -191,7 +192,7 @@ export async function POST(req: Request) {
                 imagePrompt: currentPrompt,
                 imageGenMode: usedMode,
               };
-              if (localImagePath) usage.generatedImages += 1;
+              if (localImagePath && usedMode === 'imagen') usage.generatedImages += 1;
 
               send({
                 type: 'image_ready',
@@ -252,13 +253,15 @@ export async function POST(req: Request) {
               costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
             });
           }
-          costLines.push({
-            provider: 'google',
-            model: 'gemini-2.5-flash-lite',
-            step: 'image_review',
-            usage: { estimatedReviews: usage.generatedImages, estimatedInputTokens: usage.generatedImages * 450, estimatedOutputTokens: usage.generatedImages * 50 },
-            costUsd: costGeminiText(usage.generatedImages * 450, usage.generatedImages * 50),
-          });
+          if (usage.imageReviews > 0) {
+            costLines.push({
+              provider: 'google',
+              model: 'gemini-2.5-flash-lite',
+              step: 'image_review',
+              usage: { estimatedReviews: usage.imageReviews, estimatedInputTokens: usage.imageReviews * 450, estimatedOutputTokens: usage.imageReviews * 50 },
+              costUsd: costGeminiText(usage.imageReviews * 450, usage.imageReviews * 50),
+            });
+          }
           await insertUsageEvents({ supabase, userId: user.id, accountId: account.id, projectId, videoId, lines: costLines, estimated: false });
           await supabase
             .from('videos')

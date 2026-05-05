@@ -63,23 +63,28 @@ export function VideoEditor({ video }: Props) {
   const [saveStatus, setSaveStatus] = useState<EditorSaveStatus>('saved');
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const saveEdits = useCallback(async (settings: Partial<VideoSettings>, segments: SegmentData[]) => {
+    const res = await fetch(`/api/videos/${video.id}/save-edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ editedSettings: settings, editedSegments: segments }),
+    });
+    if (!res.ok) throw new Error(await readApiError(res));
+  }, [video.id]);
+
   const scheduleAutoSave = useCallback((settings: Partial<VideoSettings>, segments: SegmentData[]) => {
     setSaveStatus('unsaved');
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
       setSaveStatus('saving');
       try {
-        const res = await fetch(`/api/videos/${video.id}/save-edit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ editedSettings: settings, editedSegments: segments }),
-        });
-        setSaveStatus(res.ok ? 'saved' : 'error');
+        await saveEdits(settings, segments);
+        setSaveStatus('saved');
       } catch {
         setSaveStatus('error');
       }
     }, 1500);
-  }, [video.id]);
+  }, [saveEdits]);
 
   // ── Re-render state ───────────────────────────────────────────────────
   const [isRerendering, setIsRerendering] = useState(false);
@@ -135,9 +140,23 @@ export function VideoEditor({ video }: Props) {
     setSelectedIdx(idx + 1);
   }, [editedSettings, scheduleAutoSave]);
 
-  const onImageRegenerated = useCallback((idx: number, localPath: string) => {
+  const onImageRegenerated = useCallback((idx: number, localPath: string, prompt: string, mode: SegmentData['imageGenMode']) => {
     setLocalImageUrls((prev) => ({ ...prev, [idx]: localPath }));
-  }, []);
+    setEditedSegments((prev) => {
+      if (idx < 0 || idx >= prev.length) return prev;
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        localImagePath: localPath,
+        imageUrl: localPath,
+        imagePrompt: prompt,
+        imageGenMode: mode,
+      };
+      delete (next[idx] as SegmentData & { _regenerateImage?: boolean })._regenerateImage;
+      scheduleAutoSave(editedSettings, next);
+      return next;
+    });
+  }, [editedSettings, scheduleAutoSave]);
 
   // ── Remotion preview props ─────────────────────────────────────────────
   const previewImageUrls = useMemo(() => ({
@@ -173,6 +192,11 @@ export function VideoEditor({ video }: Props) {
     setShowResult(false);
 
     try {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      setSaveStatus('saving');
+      await saveEdits(editedSettings, editedSegments);
+      setSaveStatus('saved');
+
       const res = await fetch(`/api/videos/${video.id}/rerender`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -203,7 +227,7 @@ export function VideoEditor({ video }: Props) {
     } finally {
       setIsRerendering(false);
     }
-  }, [video.id]);
+  }, [editedSettings, editedSegments, saveEdits, video.id]);
 
   // ── Derived ───────────────────────────────────────────────────────────
   const isVertical = (editedSettings.orientation ?? 'vertical') === 'vertical';
@@ -391,6 +415,8 @@ export function VideoEditor({ video }: Props) {
                   segment={selectedSeg as SegmentData & { _removed?: boolean }}
                   segmentIdx={selectedIdx}
                   totalSegments={editedSegments.length}
+                  videoId={video.id}
+                  projectId={video.project_id}
                   imageUrl={video.imageUrlsByIndex[selectedIdx]}
                   previewImageUrl={localImageUrls[selectedIdx]}
                   orientation={editedSettings.orientation ?? 'vertical'}
