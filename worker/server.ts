@@ -1,6 +1,7 @@
 import http from 'http';
 import { processVideoJob } from '@/worker/processJob';
 import { startPollingQueuedJobs } from '@/worker/pollQueuedJobs';
+import { WORKER_BUILD_VERSION } from '@/worker/version';
 
 const port = Number(process.env.WORKER_PORT ?? process.env.PORT ?? 8787);
 const workerSecret = process.env.WORKER_SECRET;
@@ -38,7 +39,7 @@ function isAuthorized(req: http.IncomingMessage) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, { ok: true, workerVersion: WORKER_BUILD_VERSION });
     return;
   }
 
@@ -71,6 +72,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`[worker] listening on http://localhost:${port}`);
+  console.log(`[worker] listening on http://localhost:${port}`, { workerVersion: WORKER_BUILD_VERSION });
   startPollingQueuedJobs();
 });
