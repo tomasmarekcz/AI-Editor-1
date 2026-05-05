@@ -25,6 +25,44 @@ function normalizeVideo(row: Record<string, unknown>) {
   };
 }
 
+function getRpcRow(data: unknown): Record<string, unknown> | null {
+  if (Array.isArray(data)) {
+    const first = data[0];
+    return first && typeof first === 'object' ? first as Record<string, unknown> : null;
+  }
+
+  return data && typeof data === 'object' ? data as Record<string, unknown> : null;
+}
+
+async function fetchVideoSnapshot(
+  supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  videoId: string,
+) {
+  const { data, error } = await supabase
+    .from('videos')
+    .select('id,status,current_step,queued_at,processing_started_at,worker_id,worker_attempts,last_worker_error,segments,settings,final_video_path')
+    .eq('id', videoId)
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!data) return { missing: true };
+
+  const row = data as Record<string, unknown>;
+  return {
+    id: row.id,
+    status: row.status,
+    current_step: row.current_step,
+    queued_at: row.queued_at,
+    processing_started_at: row.processing_started_at,
+    worker_id: row.worker_id,
+    worker_attempts: row.worker_attempts,
+    last_worker_error: row.last_worker_error,
+    segmentsCount: Array.isArray(row.segments) ? row.segments.length : null,
+    hasSettings: Boolean(row.settings),
+    final_video_path: row.final_video_path,
+  };
+}
+
 export async function claimVideoJob(videoId: string) {
   const supabase = createSupabaseAdminClient();
   if (!supabase) throw new Error('SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
@@ -55,7 +93,8 @@ export async function claimVideoJob(videoId: string) {
     });
     throw error;
   }
-  const row = Array.isArray(data) ? data[0] : null;
+  const row = getRpcRow(data);
+  const snapshot = row ? null : await fetchVideoSnapshot(supabase, videoId);
   await logWorkerEvent({
     supabase,
     videoId,
@@ -65,7 +104,12 @@ export async function claimVideoJob(videoId: string) {
     event: row ? 'claimed' : 'not_claimed',
     level: row ? 'info' : 'warn',
     message: row ? 'Video job claimed.' : 'No queued video row was returned. Status is likely no longer queued.',
-    metadata: { workerId: workerId() },
+    metadata: {
+      workerId: workerId(),
+      rpcDataShape: Array.isArray(data) ? 'array' : typeof data,
+      rpcRows: Array.isArray(data) ? data.length : data ? 1 : 0,
+      snapshot,
+    },
   });
   return row ? { supabase, video: normalizeVideo(row as Record<string, unknown>) } : null;
 }
@@ -97,7 +141,7 @@ export async function claimNextVideoJob() {
     });
     throw error;
   }
-  const row = Array.isArray(data) ? data[0] : null;
+  const row = getRpcRow(data);
   await logWorkerEvent({
     supabase,
     videoId: row?.id ? String(row.id) : null,
@@ -106,9 +150,38 @@ export async function claimNextVideoJob() {
     source: 'worker-claim',
     event: row ? 'claim_next_claimed' : 'claim_next_empty',
     message: row ? 'Next queued job claimed.' : 'No queued jobs available.',
-    metadata: { workerId: workerId() },
+    metadata: {
+      workerId: workerId(),
+      rpcDataShape: Array.isArray(data) ? 'array' : typeof data,
+      rpcRows: Array.isArray(data) ? data.length : data ? 1 : 0,
+    },
   });
   return row ? { supabase, video: normalizeVideo(row as Record<string, unknown>) } : null;
+}
+
+async function markJobNotClaimed(videoId: string, reason: string) {
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return;
+
+  const snapshot = await fetchVideoSnapshot(supabase, videoId);
+  await logWorkerEvent({
+    supabase,
+    videoId,
+    source: 'worker-process',
+    event: 'not_claimed_direct',
+    level: 'warn',
+    message: reason,
+    metadata: { snapshot },
+  });
+
+  await supabase
+    .from('videos')
+    .update({
+      last_worker_error: reason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', videoId)
+    .eq('status', 'queued');
 }
 
 async function ensureAccountCanRun(supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>, video: { id: string; accountId: string }) {
@@ -226,7 +299,13 @@ export async function processClaimedJob(
 }
 
 export async function processVideoJob(videoId: string) {
-  return processClaimedJob(await claimVideoJob(videoId));
+  const claimed = await claimVideoJob(videoId);
+  if (!claimed) {
+    const reason = 'Worker could not claim this video. Check video status, claim_video_job RPC, and worker Supabase env.';
+    await markJobNotClaimed(videoId, reason);
+    return { ok: false, videoId, error: reason } satisfies ProcessJobResult;
+  }
+  return processClaimedJob(claimed);
 }
 
 export async function processNextQueuedJob() {
