@@ -120,12 +120,12 @@ async function generateOpenAIVoiceover(
   const useInstructions = instructions.length > 0;
 
   const params: Record<string, unknown> = {
-    model: useInstructions ? 'gpt-4o-mini-tts' : settings.hdQuality ? 'tts-1-hd' : 'tts-1',
+    model: settings.hdQuality ? 'tts-1-hd' : useInstructions ? 'gpt-4o-mini-tts' : 'tts-1',
     voice: settings.voice,
     input: text,
     speed: Math.max(0.25, Math.min(4.0, settings.speed)),
   };
-  if (useInstructions) params.instructions = instructions;
+  if (useInstructions && !settings.hdQuality) params.instructions = instructions;
 
   const mp3 = await openai.audio.speech.create(
     params as unknown as Parameters<typeof openai.audio.speech.create>[0],

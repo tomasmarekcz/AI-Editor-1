@@ -265,6 +265,16 @@ export async function runVideoPipeline({
     parallelTasks.push(
       Promise.all(
         processed.map(async (seg, i) => {
+          if (localImageExists(seg.localImagePath)) {
+            send({ type: 'image_ready', index: i, imageUrl: seg.localImagePath ?? '' });
+            await logPipeline('image_reused', `Image ${i} already ready; keeping existing asset.`, {
+              index: i,
+              localImagePath: seg.localImagePath,
+              imageGenMode: seg.imageGenMode,
+            });
+            return;
+          }
+
           const plan = plans[i] ?? {
             mode: imageSource === 'google' ? 'google' : 'imagen',
             prompt: seg.keywords || seg.text.slice(0, 100),
@@ -512,7 +522,10 @@ export async function runVideoPipeline({
       costUsd: roundCost((ttsText.length / 1_000) * PRICING.elevenlabs.eleven_multilingual_v2.usdPer1KCharacters),
     });
   } else {
-    const model = settings.voicePreset === 'custom' ? 'gpt-4o-mini-tts' : settings.hdQuality ? 'tts-1-hd' : 'tts-1';
+    const hasInstructions = settings.voicePreset === 'custom'
+      ? settings.customInstructions.trim().length > 0
+      : true;
+    const model = settings.hdQuality ? 'tts-1-hd' : hasInstructions ? 'gpt-4o-mini-tts' : 'tts-1';
     const costUsd = model === 'gpt-4o-mini-tts'
       ? ttsMinutes * PRICING.openai['gpt-4o-mini-tts'].estimatedUsdPerMinute
       : (ttsText.length / 1_000_000) * PRICING.openai[model].usdPer1MCharacters;

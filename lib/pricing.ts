@@ -225,7 +225,10 @@ export function estimateVideoCost(
       costUsd: roundCost((script.length / 1_000) * PRICING.elevenlabs.eleven_multilingual_v2.usdPer1KCharacters),
     });
   } else {
-    const model = settings.voicePreset === 'custom' ? 'gpt-4o-mini-tts' : settings.hdQuality ? 'tts-1-hd' : 'tts-1';
+    const hasInstructions = settings.voicePreset === 'custom'
+      ? settings.customInstructions.trim().length > 0
+      : true;
+    const model = settings.hdQuality ? 'tts-1-hd' : hasInstructions ? 'gpt-4o-mini-tts' : 'tts-1';
     const costUsd = model === 'gpt-4o-mini-tts'
       ? audioMinutes * PRICING.openai['gpt-4o-mini-tts'].estimatedUsdPerMinute
       : (script.length / 1_000_000) * PRICING.openai[model].usdPer1MCharacters;

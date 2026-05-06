@@ -345,18 +345,30 @@ export default function VideoDashboard({
   }, [activeVideoId, projectId, settings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Upload ────────────────────────────────────────────────────────────────
-  const handleUpload = useCallback(async (segId: string, file: File) => {
+  const handleUpload = useCallback(async (segId: string, file: File, segmentIndex: number) => {
     setSegments((p) => p.map((s) => s.id === segId ? { ...s, uploading: true } : s));
     const preview = URL.createObjectURL(file);
     const fd = new FormData();
-    fd.append('file', file); fd.append('segmentId', segId);
+    fd.append('file', file);
+    fd.append('segmentId', segId);
+    fd.append('segmentIndex', String(segmentIndex));
+    if (projectId) fd.append('projectId', projectId);
+    if (activeVideoId) fd.append('videoId', activeVideoId);
     try {
       const res  = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json() as { localPath?: string; error?: string };
+      const data = await res.json() as { localPath?: string; storagePath?: string | null; error?: string };
       if (!res.ok || data.error) throw new Error(data.error ?? await readApiError(res));
       setSegments((p) =>
         p.map((s) => s.id === segId
-          ? { ...s, localImagePath: data.localPath, uploadPreviewUrl: preview, uploading: false }
+          ? {
+              ...s,
+              localImagePath: data.localPath,
+              uploadPreviewUrl: preview,
+              uploading: false,
+              imageGenMode: undefined,
+              imagePrompt: undefined,
+              imageError: undefined,
+            }
           : s,
         ),
       );
@@ -364,7 +376,7 @@ export default function VideoDashboard({
       setSegments((p) => p.map((s) => s.id === segId ? { ...s, uploading: false } : s));
       alert(`Chyba nahrávání: ${err instanceof Error ? err.message : err}`);
     }
-  }, []);
+  }, [activeVideoId, projectId]);
 
   // ── Regenerate single image (review step) ─────────────────────────────────
   const handleRegenerate = useCallback(async (segId: string, prompt: string, mode: ImageGenMode) => {
@@ -606,7 +618,7 @@ export default function VideoDashboard({
                   {settings.hdQuality ? '✦ HD' : '○ Standard'}
                 </button>
                 <p className="text-[10px] text-gray-600 mt-1 text-center">
-                  {settings.voicePreset !== 'custom' ? 'n/a při voice stylu' : 'tts-1-hd, pomalejší'}
+                  {settings.hdQuality ? 'tts-1-hd, bez voice instrukcí' : 'preset používá instrukční model'}
                 </p>
               </div>
             </div>
@@ -965,7 +977,7 @@ export default function VideoDashboard({
                   <input
                     ref={(el) => { fileInputRefs.current[seg.id] = el; }}
                     type="file" accept="image/*,video/mp4,video/mov,video/webm" className="hidden"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(seg.id, f); }}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(seg.id, f, i); }}
                   />
                   <span className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-1.5 rounded">#{i + 1}</span>
                 </div>
@@ -1129,7 +1141,7 @@ export default function VideoDashboard({
                     <input
                       ref={(el) => { fileInputRefs.current[seg.id] = el; }}
                       type="file" accept="image/*,video/mp4,video/mov,video/webm" className="hidden"
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(seg.id, f); }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(seg.id, f, i); }}
                     />
                   </div>
 

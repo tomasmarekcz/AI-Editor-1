@@ -240,6 +240,20 @@ export async function processClaimedJob(
       metadata: {
         segments: video.segments.length,
         settingsKeys: Object.keys(video.settings ?? {}),
+        settings: {
+          ttsProvider: video.settings?.ttsProvider,
+          voice: video.settings?.voice,
+          voicePreset: video.settings?.voicePreset,
+          speed: video.settings?.speed,
+          hdQuality: video.settings?.hdQuality,
+          geminiVoice: video.settings?.geminiVoice,
+          geminiPreset: video.settings?.geminiPreset,
+          orientation: video.settings?.orientation,
+          imageSource: video.settings?.imageSource,
+          enableEffects: video.settings?.enableEffects,
+          subtitle: video.settings?.subtitle,
+          segmentDuration: video.settings?.segmentDuration,
+        },
       },
     });
     await ensureAccountCanRun(supabase, video);
