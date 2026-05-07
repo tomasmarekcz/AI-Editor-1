@@ -61,6 +61,9 @@ export type SavedVideo = {
   final_video_mime_type: string | null;
   final_video_size_bytes: number | null;
   thumbnail_path: string | null;
+  thumbnail_prompt: string | null;
+  thumbnail_source: 'default' | 'ai' | 'uploaded';
+  thumbnail_updated_at: string | null;
   error_message: string | null;
   estimated_cost_usd: number | null;
   actual_cost_usd: number | null;

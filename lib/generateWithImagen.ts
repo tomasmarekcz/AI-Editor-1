@@ -4,11 +4,10 @@ import type { Orientation } from '@/types';
 
 const IMAGEN_MODEL = 'imagen-4.0-generate-001';
 
-export async function generateWithImagen(
+export async function generateImagenImage(
   prompt: string,
-  segmentId: string,
   orientation: Orientation,
-): Promise<string> {
+): Promise<{ buffer: Buffer; mimeType: string }> {
   const apiKey = process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
 
@@ -39,13 +38,26 @@ export async function generateWithImagen(
     throw new Error('Imagen returned no image data');
   }
 
+  return {
+    buffer: Buffer.from(prediction.bytesBase64Encoded, 'base64'),
+    mimeType: prediction.mimeType || 'image/png',
+  };
+}
+
+export async function generateWithImagen(
+  prompt: string,
+  segmentId: string,
+  orientation: Orientation,
+): Promise<string> {
+  const image = await generateImagenImage(prompt, orientation);
+
   const dir = path.join(process.cwd(), 'public', 'tmp', 'images');
   fs.mkdirSync(dir, { recursive: true });
 
-  const ext = prediction.mimeType === 'image/png' ? 'png' : 'jpg';
+  const ext = image.mimeType === 'image/png' ? 'png' : 'jpg';
   const filename = `${segmentId}.${ext}`;
   const filepath = path.join(dir, filename);
-  fs.writeFileSync(filepath, Buffer.from(prediction.bytesBase64Encoded, 'base64'));
+  fs.writeFileSync(filepath, image.buffer);
 
   return `/tmp/images/${filename}`;
 }

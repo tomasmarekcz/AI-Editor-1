@@ -1,10 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 
 type PlatformId = 'instagram' | 'youtube' | 'tiktok';
 type SoundChoice = 'original' | 'trending' | 'none';
+type ThumbnailMode = 'default' | 'ai' | 'upload';
+type ThumbnailSource = 'default' | 'ai' | 'uploaded';
 
 type PlatformState = {
   enabled: boolean;
@@ -47,17 +49,34 @@ export function PublishVideoClient({
   videoUrl,
   projectName,
   projectNiche,
+  initialThumbnailUrl,
+  initialThumbnailPath,
+  initialThumbnailPrompt,
+  initialThumbnailSource,
 }: {
   videoId: string;
   videoTitle: string;
   videoUrl: string | null;
   projectName: string;
   projectNiche: string;
+  initialThumbnailUrl: string | null;
+  initialThumbnailPath: string | null;
+  initialThumbnailPrompt: string;
+  initialThumbnailSource: ThumbnailSource;
 }) {
   const [caption, setCaption] = useState('');
   const [hasGeneratedCaption, setHasGeneratedCaption] = useState(false);
   const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
   const [captionError, setCaptionError] = useState('');
+  const [thumbnailMode, setThumbnailMode] = useState<ThumbnailMode>(initialThumbnailSource === 'ai' ? 'ai' : initialThumbnailSource === 'uploaded' ? 'upload' : 'default');
+  const [thumbnailUrl, setThumbnailUrl] = useState(initialThumbnailUrl);
+  const [thumbnailPath, setThumbnailPath] = useState(initialThumbnailPath);
+  const [thumbnailPrompt, setThumbnailPrompt] = useState(initialThumbnailPrompt);
+  const [thumbnailSource, setThumbnailSource] = useState<ThumbnailSource>(initialThumbnailSource);
+  const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
+  const [isUploadingThumbnail, setIsUploadingThumbnail] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState('');
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [automaticPublishing, setAutomaticPublishing] = useState(false);
   const [platforms, setPlatforms] = useState<Record<PlatformId, PlatformState>>(defaultPlatformState);
   const [publishDate, setPublishDate] = useState('');
@@ -100,6 +119,82 @@ export function PublishVideoClient({
       setCaptionError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsGeneratingCaption(false);
+    }
+  }
+
+  async function generateThumbnail() {
+    if (isGeneratingThumbnail) return;
+    setIsGeneratingThumbnail(true);
+    setThumbnailError('');
+    setDraftMessage('');
+
+    try {
+      const res = await fetch(`/api/videos/${videoId}/thumbnail/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: thumbnailPrompt }),
+      });
+      const data = await res.json() as {
+        thumbnailUrl?: string | null;
+        storagePath?: string;
+        prompt?: string;
+        source?: ThumbnailSource;
+        error?: string;
+      };
+      if (!res.ok || data.error || !data.thumbnailUrl || !data.storagePath) {
+        throw new Error(data.error ?? await readApiError(res));
+      }
+
+      setThumbnailUrl(data.thumbnailUrl);
+      setThumbnailPath(data.storagePath);
+      setThumbnailPrompt(data.prompt ?? thumbnailPrompt);
+      setThumbnailSource(data.source ?? 'ai');
+      setThumbnailMode('ai');
+      setDraftMessage('Thumbnail generated and set as active.');
+    } catch (err) {
+      setThumbnailError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsGeneratingThumbnail(false);
+    }
+  }
+
+  async function uploadThumbnail(file: File | null) {
+    if (!file || isUploadingThumbnail) return;
+    setIsUploadingThumbnail(true);
+    setThumbnailError('');
+    setDraftMessage('');
+
+    try {
+      if (!file.type.startsWith('image/')) {
+        throw new Error('Please upload an image file.');
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/videos/${videoId}/thumbnail/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json() as {
+        thumbnailUrl?: string | null;
+        storagePath?: string;
+        source?: ThumbnailSource;
+        error?: string;
+      };
+      if (!res.ok || data.error || !data.thumbnailUrl || !data.storagePath) {
+        throw new Error(data.error ?? await readApiError(res));
+      }
+
+      setThumbnailUrl(data.thumbnailUrl);
+      setThumbnailPath(data.storagePath);
+      setThumbnailSource(data.source ?? 'uploaded');
+      setThumbnailMode('upload');
+      setDraftMessage('Uploaded thumbnail set as active.');
+    } catch (err) {
+      setThumbnailError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsUploadingThumbnail(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
     }
   }
 
@@ -189,6 +284,115 @@ export function PublishVideoClient({
                 {captionError}
               </p>
             )}
+          </div>
+
+          <div className="rounded-lg border border-gray-800 bg-gray-900/75 p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xs font-black uppercase tracking-[0.22em] text-gray-400">
+                  Thumbnail
+                </h2>
+                <p className="mt-2 text-xs text-gray-500">
+                  Active source: {thumbnailSource === 'ai' ? 'AI generated' : thumbnailSource === 'uploaded' ? 'Uploaded' : 'Default'}
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-1 rounded-lg border border-gray-800 bg-gray-950 p-1">
+                {([
+                  ['default', 'Default'],
+                  ['ai', 'Generate with AI'],
+                  ['upload', 'Upload'],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setThumbnailMode(mode);
+                      setThumbnailError('');
+                    }}
+                    className={`rounded px-3 py-2 text-xs font-black transition ${
+                      thumbnailMode === mode
+                        ? 'bg-cyan-400 text-gray-950'
+                        : 'text-gray-400 hover:bg-gray-900 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-[180px_1fr]">
+              {thumbnailUrl ? (
+                <img
+                  src={thumbnailUrl}
+                  alt=""
+                  className="aspect-[9/16] w-full rounded-lg border border-gray-800 bg-gray-950 object-cover"
+                />
+              ) : (
+                <div className="flex aspect-[9/16] w-full items-center justify-center rounded-lg border border-dashed border-gray-700 bg-gray-950 p-4 text-center text-xs font-bold text-gray-600">
+                  No thumbnail
+                </div>
+              )}
+
+              <div className="min-w-0">
+                {thumbnailMode === 'default' && (
+                  <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+                    <p className="text-sm font-bold text-gray-200">
+                      {thumbnailPath ? 'Using the current default thumbnail.' : 'No default thumbnail is available yet.'}
+                    </p>
+                    <p className="mt-2 break-all text-xs text-gray-500">
+                      {thumbnailPath ?? 'The first available image asset will be used when one exists.'}
+                    </p>
+                  </div>
+                )}
+
+                {thumbnailMode === 'ai' && (
+                  <div>
+                    <label htmlFor="thumbnailPrompt" className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-500">
+                      Prompt
+                    </label>
+                    <textarea
+                      id="thumbnailPrompt"
+                      value={thumbnailPrompt}
+                      onChange={(event) => setThumbnailPrompt(event.target.value)}
+                      rows={5}
+                      placeholder="Leave empty to generate a thumbnail prompt from the script."
+                      className="mt-2 w-full resize-none rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-gray-600 focus:border-cyan-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={generateThumbnail}
+                      disabled={isGeneratingThumbnail}
+                      className="mt-3 rounded-lg border border-cyan-700 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-200 transition hover:border-cyan-400 hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+                    >
+                      {isGeneratingThumbnail ? 'Generating...' : 'Generate thumbnail with AI'}
+                    </button>
+                  </div>
+                )}
+
+                {thumbnailMode === 'upload' && (
+                  <div className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+                    <input
+                      ref={uploadInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={(event) => uploadThumbnail(event.target.files?.[0] ?? null)}
+                      className="block w-full text-sm text-gray-300 file:mr-4 file:rounded-lg file:border-0 file:bg-cyan-400 file:px-4 file:py-2 file:text-sm file:font-black file:text-gray-950 hover:file:bg-cyan-300"
+                      disabled={isUploadingThumbnail}
+                    />
+                    <p className="mt-3 text-xs text-gray-500">
+                      {isUploadingThumbnail ? 'Uploading...' : 'JPEG, PNG, WebP, or GIF.'}
+                    </p>
+                  </div>
+                )}
+
+                {thumbnailError && (
+                  <p className="mt-3 rounded-lg border border-red-800 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+                    {thumbnailError}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="rounded-lg border border-gray-800 bg-gray-900/75 p-5">
