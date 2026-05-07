@@ -19,6 +19,8 @@ const DEFAULT_SUBTITLE: SubtitleSettings = {
   positionY: 10,
   color: '#ffffff',
   highlightColor: '#FFE400',
+  captionStrokeColor: '#000000',
+  captionStrokeWidth: 0,
   sizeScale: 1,
   animation: 'none',
 };
@@ -118,6 +120,10 @@ const normalizeSubtitle = (subtitle: VideoSettings['subtitle'] | undefined): Sub
   chunkSize: subtitle?.chunkSize ?? DEFAULT_SUBTITLE.chunkSize,
   positionY: typeof subtitle?.positionY === 'number' ? subtitle.positionY : DEFAULT_SUBTITLE.positionY,
   sizeScale: typeof subtitle?.sizeScale === 'number' && subtitle.sizeScale > 0 ? subtitle.sizeScale : DEFAULT_SUBTITLE.sizeScale,
+  captionStrokeColor: subtitle?.captionStrokeColor ?? DEFAULT_SUBTITLE.captionStrokeColor,
+  captionStrokeWidth: typeof subtitle?.captionStrokeWidth === 'number'
+    ? Math.max(0, Math.min(12, subtitle.captionStrokeWidth))
+    : DEFAULT_SUBTITLE.captionStrokeWidth,
 });
 
 export async function renderVideo(

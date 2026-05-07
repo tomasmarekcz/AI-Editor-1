@@ -8,6 +8,8 @@ export const DEFAULT_SUBTITLE_SETTINGS: SubtitleSettings = {
   positionY: 10,
   color: '#ffffff',
   highlightColor: '#FFE400',
+  captionStrokeColor: '#000000',
+  captionStrokeWidth: 0,
   sizeScale: 1.0,
   animation: 'word-highlight',
 };

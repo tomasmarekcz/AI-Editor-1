@@ -775,6 +775,52 @@ export default function VideoDashboard({
             </div>
           </div>
         )}
+
+        <div>
+          <SectionLabel>Barva ohraničení</SectionLabel>
+          <div className="flex gap-1.5 flex-wrap mb-2">
+            {TEXT_COLORS.map((c) => (
+              <button key={c} onClick={() => setSub({ captionStrokeColor: c })}
+                className={`w-7 h-7 rounded-full border-2 transition-all ${
+                  (settings.subtitle.captionStrokeColor ?? '#000000') === c ? 'border-white scale-110' : 'border-gray-600'
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <input type="color" value={settings.subtitle.captionStrokeColor ?? '#000000'}
+              onChange={(e) => setSub({ captionStrokeColor: e.target.value })}
+              title="Vlastní barva ohraničení"
+              className="w-7 h-7 rounded-full border-2 border-gray-600 cursor-pointer bg-transparent"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded border border-gray-600 flex-shrink-0" style={{ backgroundColor: settings.subtitle.captionStrokeColor ?? '#000000' }} />
+            <input
+              type="text"
+              value={settings.subtitle.captionStrokeColor ?? '#000000'}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setSub({ captionStrokeColor: v.length === 7 ? v : v });
+              }}
+              onBlur={(e) => {
+                if (!/^#[0-9a-fA-F]{6}$/.test(e.target.value)) setSub({ captionStrokeColor: settings.subtitle.captionStrokeColor ?? '#000000' });
+              }}
+              maxLength={7}
+              placeholder="#000000"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 font-mono focus:outline-none focus:border-purple-500"
+            />
+          </div>
+        </div>
+
+        <div>
+          <SectionLabel>Ohraničení — {settings.subtitle.captionStrokeWidth ?? 0}px</SectionLabel>
+          <input
+            type="range" min={0} max={12} step={1}
+            value={settings.subtitle.captionStrokeWidth ?? 0}
+            onChange={(e) => setSub({ captionStrokeWidth: Number(e.target.value) })}
+            className="w-full accent-purple-500"
+          />
+        </div>
       </div>
     </div>
   );

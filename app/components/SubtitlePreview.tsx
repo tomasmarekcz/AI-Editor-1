@@ -98,7 +98,21 @@ export function SubtitlePreview({ orientation, subtitle, onChange }: Props) {
 
   // ── Compute subtitle content for current preview frame ─────────────────
   const isVertical     = orientation === 'vertical';
-  const { font, allCaps, highlight, color, highlightColor, sizeScale, positionY, animation } = subtitle;
+  const {
+    font,
+    allCaps,
+    highlight,
+    color,
+    highlightColor,
+    captionStrokeColor = '#000000',
+    captionStrokeWidth = 0,
+    sizeScale,
+    positionY,
+    animation,
+  } = subtitle;
+  const strokeStyle = captionStrokeWidth > 0
+    ? { WebkitTextStroke: `${captionStrokeWidth}px ${captionStrokeColor}` }
+    : {};
 
   const chunkIdx     = Math.min(Math.floor(frame / FRAMES_PER_CHUNK), SAMPLE_CHUNKS.length - 1);
   const frameInChunk = frame - chunkIdx * FRAMES_PER_CHUNK;
@@ -134,6 +148,7 @@ export function SubtitlePreview({ orientation, subtitle, onChange }: Props) {
     lineHeight: 1.2,
     letterSpacing: '-0.01em',
     textShadow: '0 1px 6px rgba(0,0,0,0.9), 1px 1px 0 rgba(0,0,0,0.5)',
+    ...strokeStyle,
   };
 
   switch (animation) {

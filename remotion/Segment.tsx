@@ -187,7 +187,22 @@ export const Segment: React.FC<Props> = ({ segment, durationInFrames, index, sub
   const segOpacity = segmentOpacity(frame, durationInFrames, fps, segment.transition ?? 'fade');
 
   // ── Subtitle ──────────────────────────────────────────────────────────
-  const { font, allCaps, highlight, chunkSize, color, highlightColor, sizeScale, positionY, animation } = subtitle;
+  const {
+    font,
+    allCaps,
+    highlight,
+    chunkSize,
+    color,
+    highlightColor,
+    captionStrokeColor = '#000000',
+    captionStrokeWidth = 0,
+    sizeScale,
+    positionY,
+    animation,
+  } = subtitle;
+  const strokeStyle = captionStrokeWidth > 0
+    ? { WebkitTextStroke: `${captionStrokeWidth}px ${captionStrokeColor}` }
+    : {};
   const baseFontSize  = (isVertical ? 82 : 62) * sizeScale;
   const importantSet  = new Set((segment.importantWords ?? []).map(normalize));
   const isKey = (w: string) => highlight && importantSet.has(normalize(w));
@@ -239,6 +254,7 @@ export const Segment: React.FC<Props> = ({ segment, durationInFrames, index, sub
     textShadow:
       '0 0 30px rgba(0,0,0,0.9), 0 2px 6px rgba(0,0,0,0.9), ' +
       '2px 2px 0 rgba(0,0,0,0.6), -2px -2px 0 rgba(0,0,0,0.6)',
+    ...strokeStyle,
   };
 
   const wordSpans = (words: string[], activeIdx = -1) =>

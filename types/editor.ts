@@ -10,6 +10,8 @@ export interface CaptionPatch {
   stylePreset?: SubtitleAnimation;
   highlightColor?: string;    // #rrggbb
   color?: string;             // #rrggbb
+  captionStrokeColor?: string; // #rrggbb
+  captionStrokeWidth?: number; // 0–12
   font?: SubtitleFont;
   allCaps?: boolean;
   highlight?: boolean;

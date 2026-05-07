@@ -25,6 +25,8 @@ const PATCH_JSON_SCHEMA = {
         stylePreset:    { type: 'string',  enum: ['none', 'word-highlight', 'word-reveal', 'pop', 'fade-slide'] },
         highlightColor: { type: 'string',  description: '#rrggbb hex color for highlighted words' },
         color:          { type: 'string',  description: '#rrggbb hex color for normal subtitle text' },
+        captionStrokeColor: { type: 'string', description: '#rrggbb hex color for subtitle outline stroke' },
+        captionStrokeWidth: { type: 'number', description: 'Subtitle outline stroke width in pixels, 0–12. 0 disables outline.' },
         font:           { type: 'string',  enum: ['Bebas Neue', 'Impact', 'Montserrat', 'Anton', 'Poppins', 'Inter', 'Archivo Black', 'League Spartan', 'Raleway', 'Oswald', 'Roboto Condensed', 'TheBoldFont', 'Arial Black', 'Georgia', 'Verdana', 'Courier New'] },
         allCaps:        { type: 'boolean' },
         highlight:      { type: 'boolean', description: 'Highlight important words in subtitle' },

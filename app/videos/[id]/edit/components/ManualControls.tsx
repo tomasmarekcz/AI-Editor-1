@@ -183,6 +183,20 @@ export function ManualControls({ settings, segments, selectedSceneIdx, onPatch }
         onChange={(v) => onPatch({ captions: { highlightColor: v } })}
       />
 
+      <ColorPicker
+        label="Barva ohraničení"
+        value={sub?.captionStrokeColor ?? '#000000'}
+        onChange={(v) => onPatch({ captions: { captionStrokeColor: v } })}
+      />
+
+      <Slider
+        label="Ohraničení"
+        value={sub?.captionStrokeWidth ?? 0}
+        min={0} max={12} step={1}
+        displayValue={`${sub?.captionStrokeWidth ?? 0}px`}
+        onChange={(v) => onPatch({ captions: { captionStrokeWidth: v } })}
+      />
+
       <Toggle
         label="Velká písmena"
         value={sub?.allCaps ?? false}

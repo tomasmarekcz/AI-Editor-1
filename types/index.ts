@@ -26,6 +26,8 @@ export interface SubtitleSettings {
   positionY: number;
   color: string;
   highlightColor: string;
+  captionStrokeColor: string;
+  captionStrokeWidth: number;
   sizeScale: number;
   animation: SubtitleAnimation;
 }

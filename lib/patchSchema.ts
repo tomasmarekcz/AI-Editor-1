@@ -34,6 +34,10 @@ function validateCaptionPatch(raw: unknown): CaptionPatch {
   }
   if (isHex(p.highlightColor)) out.highlightColor = p.highlightColor;
   if (isHex(p.color))          out.color = p.color;
+  if (isHex(p.captionStrokeColor)) out.captionStrokeColor = p.captionStrokeColor;
+  if (typeof p.captionStrokeWidth === 'number') {
+    out.captionStrokeWidth = Math.max(0, Math.min(12, p.captionStrokeWidth));
+  }
   if (typeof p.font === 'string' && (SUBTITLE_FONTS as readonly string[]).includes(p.font)) {
     out.font = p.font as CaptionPatch['font'];
   }
@@ -117,6 +121,8 @@ export function applyPatchToSettings(
     if (c.stylePreset  != null) sub.animation      = c.stylePreset;
     if (c.highlightColor != null) sub.highlightColor = c.highlightColor;
     if (c.color        != null) sub.color          = c.color;
+    if (c.captionStrokeColor != null) sub.captionStrokeColor = c.captionStrokeColor;
+    if (c.captionStrokeWidth != null) sub.captionStrokeWidth = c.captionStrokeWidth;
     if (c.font         != null) sub.font           = c.font;
     if (c.allCaps      != null) sub.allCaps        = c.allCaps;
     if (c.highlight    != null) sub.highlight      = c.highlight;
