@@ -1,4 +1,5 @@
 import { processNextQueuedJob } from '@/worker/processJob';
+import { processNextScheduledPost } from '@/worker/processScheduledPosts';
 
 let polling = false;
 let running = false;
@@ -26,8 +27,15 @@ export function startPollingQueuedJobs() {
     running = true;
     try {
       while (true) {
-        const result = await processNextQueuedJob();
-        if (result.ok && !result.processed) break;
+        let didWork = false;
+
+        const videoResult = await processNextQueuedJob();
+        didWork = !videoResult.ok || videoResult.processed;
+
+        const postResult = await processNextScheduledPost();
+        didWork = didWork || !postResult.ok || postResult.processed;
+
+        if (!didWork) break;
         await sleep(500);
       }
     } catch (err) {

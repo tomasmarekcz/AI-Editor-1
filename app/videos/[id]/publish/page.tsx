@@ -8,6 +8,21 @@ import { PublishVideoClient } from './PublishVideoClient';
 
 export const dynamic = 'force-dynamic';
 
+type YouTubeConnection = {
+  id: string;
+  status: string;
+  platform_channel_title: string | null;
+};
+
+type ScheduledPostView = {
+  id: string;
+  platform: string;
+  status: string;
+  scheduled_for: string;
+  platform_post_url: string | null;
+  error_message: string | null;
+};
+
 export default async function PublishVideoPage({ params }: { params: { id: string } }) {
   const { supabase, account } = await requireAccountPage();
 
@@ -24,7 +39,7 @@ export default async function PublishVideoPage({ params }: { params: { id: strin
 
   const assetClient = createSupabaseAdminClient() ?? supabase;
 
-  const [{ data: project }, { data: thumbnailAssets }] = await Promise.all([
+  const [{ data: project }, { data: thumbnailAssets }, { data: youtubeConnection }, { data: scheduledPosts }] = await Promise.all([
     supabase
       .from('projects')
       .select('*')
@@ -39,6 +54,20 @@ export default async function PublishVideoPage({ params }: { params: { id: strin
       .in('kind', ['thumbnail', 'image', 'uploaded_image'])
       .order('segment_index', { ascending: true })
       .order('created_at', { ascending: false }),
+    supabase
+      .from('social_connections')
+      .select('id,status,platform_channel_title')
+      .eq('account_id', account.id)
+      .eq('platform', 'youtube')
+      .eq('status', 'connected')
+      .maybeSingle<YouTubeConnection>(),
+    supabase
+      .from('scheduled_posts')
+      .select('id,platform,status,scheduled_for,platform_post_url,error_message')
+      .eq('video_id', video.id)
+      .eq('account_id', account.id)
+      .order('created_at', { ascending: false })
+      .limit(5),
   ]);
 
   const fallbackThumbnailPath = (thumbnailAssets ?? []).find((asset) => asset.kind === 'thumbnail')?.storage_path
@@ -66,6 +95,8 @@ export default async function PublishVideoPage({ params }: { params: { id: strin
           initialThumbnailPath={thumbnailPath}
           initialThumbnailPrompt={video.thumbnail_prompt ?? ''}
           initialThumbnailSource={video.thumbnail_source ?? 'default'}
+          youtubeConnection={(youtubeConnection ?? null) as YouTubeConnection | null}
+          initialScheduledPosts={(scheduledPosts ?? []) as ScheduledPostView[]}
         />
       </main>
     </div>

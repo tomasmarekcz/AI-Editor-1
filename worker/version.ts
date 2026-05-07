@@ -1,1 +1,1 @@
-export const WORKER_BUILD_VERSION = 'worker-render-assets-v2';
+export const WORKER_BUILD_VERSION = 'worker-youtube-publishing-v1';

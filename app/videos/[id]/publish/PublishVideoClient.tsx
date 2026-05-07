@@ -14,10 +14,25 @@ type PlatformState = {
   volume: number;
 };
 
-const PLATFORMS: { id: PlatformId; label: string }[] = [
-  { id: 'instagram', label: 'Instagram Reels' },
+type YouTubeConnection = {
+  id: string;
+  status: string;
+  platform_channel_title: string | null;
+};
+
+type ScheduledPostView = {
+  id: string;
+  platform: string;
+  status: string;
+  scheduled_for: string;
+  platform_post_url: string | null;
+  error_message: string | null;
+};
+
+const PLATFORMS: { id: PlatformId; label: string; placeholder?: boolean }[] = [
+  { id: 'instagram', label: 'Instagram Reels', placeholder: true },
   { id: 'youtube', label: 'YouTube Shorts' },
-  { id: 'tiktok', label: 'TikTok' },
+  { id: 'tiktok', label: 'TikTok', placeholder: true },
 ];
 
 const SOUND_OPTIONS: { value: SoundChoice; label: string }[] = [
@@ -26,11 +41,11 @@ const SOUND_OPTIONS: { value: SoundChoice; label: string }[] = [
   { value: 'none', label: 'No added sound' },
 ];
 
-function defaultPlatformState(): Record<PlatformId, PlatformState> {
+function defaultPlatformState(youtubeConnected: boolean): Record<PlatformId, PlatformState> {
   return {
-    instagram: { enabled: true, sound: 'original', volume: 80 },
-    youtube: { enabled: true, sound: 'original', volume: 80 },
-    tiktok: { enabled: true, sound: 'original', volume: 80 },
+    instagram: { enabled: false, sound: 'original', volume: 80 },
+    youtube: { enabled: youtubeConnected, sound: 'original', volume: 80 },
+    tiktok: { enabled: false, sound: 'original', volume: 80 },
   };
 }
 
@@ -53,6 +68,8 @@ export function PublishVideoClient({
   initialThumbnailPath,
   initialThumbnailPrompt,
   initialThumbnailSource,
+  youtubeConnection,
+  initialScheduledPosts,
 }: {
   videoId: string;
   videoTitle: string;
@@ -63,7 +80,10 @@ export function PublishVideoClient({
   initialThumbnailPath: string | null;
   initialThumbnailPrompt: string;
   initialThumbnailSource: ThumbnailSource;
+  youtubeConnection: YouTubeConnection | null;
+  initialScheduledPosts: ScheduledPostView[];
 }) {
+  const youtubeConnected = youtubeConnection?.status === 'connected';
   const [caption, setCaption] = useState('');
   const [hasGeneratedCaption, setHasGeneratedCaption] = useState(false);
   const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
@@ -78,10 +98,13 @@ export function PublishVideoClient({
   const [thumbnailError, setThumbnailError] = useState('');
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [automaticPublishing, setAutomaticPublishing] = useState(false);
-  const [platforms, setPlatforms] = useState<Record<PlatformId, PlatformState>>(defaultPlatformState);
+  const [platforms, setPlatforms] = useState<Record<PlatformId, PlatformState>>(() => defaultPlatformState(youtubeConnected));
   const [publishDate, setPublishDate] = useState('');
   const [publishTime, setPublishTime] = useState('');
   const [draftMessage, setDraftMessage] = useState('');
+  const [scheduleError, setScheduleError] = useState('');
+  const [isScheduling, setIsScheduling] = useState(false);
+  const [scheduledPosts, setScheduledPosts] = useState(initialScheduledPosts);
 
   const timezone = useMemo(() => {
     try {
@@ -91,8 +114,7 @@ export function PublishVideoClient({
     }
   }, []);
 
-  const selectedPlatforms = PLATFORMS.filter((platform) => platforms[platform.id].enabled);
-  const canSchedule = automaticPublishing && selectedPlatforms.length > 0 && publishDate && publishTime;
+  const canSchedule = automaticPublishing && youtubeConnected && platforms.youtube.enabled && publishDate && publishTime && videoUrl;
 
   async function generateCaption() {
     if (isGeneratingCaption) return;
@@ -199,6 +221,8 @@ export function PublishVideoClient({
   }
 
   function updatePlatform(id: PlatformId, patch: Partial<PlatformState>) {
+    if (id !== 'youtube') return;
+    if (!youtubeConnected) return;
     setPlatforms((current) => ({
       ...current,
       [id]: { ...current[id], ...patch },
@@ -210,12 +234,42 @@ export function PublishVideoClient({
     setDraftMessage('Publishing draft saved locally for this page. Database persistence will be added with the future publishing backend.');
   }
 
-  function schedulePublishing() {
+  async function schedulePublishing() {
     if (!canSchedule) {
-      setDraftMessage('Choose at least one platform and a publishing date/time before scheduling.');
+      setDraftMessage('Connect YouTube, select YouTube Shorts, and choose a publishing date/time before scheduling.');
       return;
     }
-    setDraftMessage('Publishing schedule prepared locally. Real platform upload is not connected yet.');
+
+    setIsScheduling(true);
+    setDraftMessage('');
+    setScheduleError('');
+    try {
+      const localDate = new Date(`${publishDate}T${publishTime}`);
+      if (Number.isNaN(localDate.getTime())) throw new Error('Choose a valid publishing date and time.');
+
+      const res = await fetch(`/api/videos/${videoId}/publish/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caption,
+          title: videoTitle,
+          scheduledFor: localDate.toISOString(),
+          timezone,
+          thumbnailStoragePath: thumbnailPath,
+          privacyStatus: 'public',
+        }),
+      });
+      const data = await res.json() as { scheduledPost?: ScheduledPostView; error?: string };
+      if (!res.ok || data.error || !data.scheduledPost) {
+        throw new Error(data.error ?? await readApiError(res));
+      }
+      setScheduledPosts((current) => [data.scheduledPost as ScheduledPostView, ...current].slice(0, 5));
+      setDraftMessage('YouTube Shorts publishing has been scheduled.');
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsScheduling(false);
+    }
   }
 
   return (
@@ -403,13 +457,14 @@ export function PublishVideoClient({
                 onChange={(event) => {
                   setAutomaticPublishing(event.target.checked);
                   setDraftMessage('');
+                  setScheduleError('');
                 }}
                 className="mt-1 h-4 w-4 accent-cyan-400"
               />
               <span>
                 <span className="block text-sm font-black text-white">Automatically publish this video</span>
                 <span className="mt-1 block text-xs leading-5 text-gray-500">
-                  Platform controls are placeholders until the upload integrations are connected.
+                  YouTube Shorts can be scheduled now. Instagram and TikTok are placeholders for later integrations.
                 </span>
               </span>
             </label>
@@ -421,20 +476,35 @@ export function PublishVideoClient({
               <div className="grid gap-3">
                 {PLATFORMS.map((platform) => {
                   const state = platforms[platform.id];
+                  const disabled = platform.placeholder || (platform.id === 'youtube' && !youtubeConnected);
                   return (
-                    <div key={platform.id} className="rounded-lg border border-gray-800 bg-gray-950 p-4">
+                    <div key={platform.id} className={`rounded-lg border border-gray-800 bg-gray-950 p-4 ${disabled ? 'opacity-55' : ''}`}>
                       <label className="flex items-center gap-3">
                         <input
                           type="checkbox"
                           checked={state.enabled}
+                          disabled={disabled}
                           onChange={(event) => updatePlatform(platform.id, { enabled: event.target.checked })}
                           className="h-4 w-4 accent-cyan-400"
                         />
                         <span className="text-sm font-bold text-gray-100">{platform.label}</span>
+                        {platform.placeholder && (
+                          <span className="rounded border border-gray-800 px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-gray-500">
+                            Soon
+                          </span>
+                        )}
+                        {platform.id === 'youtube' && !youtubeConnected && (
+                          <Link href="/settings" className="text-xs font-bold text-cyan-300 hover:text-cyan-100">
+                            Connect in Settings
+                          </Link>
+                        )}
                       </label>
 
-                      {state.enabled && (
+                      {platform.id === 'youtube' && youtubeConnected && state.enabled && (
                         <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_180px]">
+                          <div className="rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-sm text-gray-300">
+                            Channel: <span className="font-bold text-white">{youtubeConnection?.platform_channel_title ?? 'YouTube'}</span>
+                          </div>
                           <label className="block">
                             <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-500">
                               Sound selection
@@ -516,16 +586,43 @@ export function PublishVideoClient({
               <button
                 type="button"
                 onClick={schedulePublishing}
-                className="flex-1 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-gray-950 transition hover:bg-cyan-300"
+                disabled={isScheduling || !canSchedule}
+                className="flex-1 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-gray-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-gray-800 disabled:text-gray-600"
               >
-                Schedule Publishing
+                {isScheduling ? 'Scheduling...' : 'Schedule Publishing'}
               </button>
             </div>
+
+            {scheduleError && (
+              <p className="mt-4 rounded-lg border border-red-800 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+                {scheduleError}
+              </p>
+            )}
 
             {draftMessage && (
               <p className="mt-4 rounded-lg border border-cyan-900 bg-cyan-950/30 px-3 py-2 text-sm text-cyan-100">
                 {draftMessage}
               </p>
+            )}
+
+            {scheduledPosts.length > 0 && (
+              <div className="mt-5 rounded-lg border border-gray-800 bg-gray-950 p-4">
+                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-gray-500">
+                  Scheduled posts
+                </p>
+                <div className="mt-3 space-y-2">
+                  {scheduledPosts.map((post) => (
+                    <div key={post.id} className="flex flex-col gap-1 rounded border border-gray-800 bg-gray-900 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                      <span className="font-bold text-gray-200">
+                        YouTube · {new Date(post.scheduled_for).toLocaleString()}
+                      </span>
+                      <span className="text-xs font-black uppercase tracking-[0.12em] text-cyan-300">
+                        {post.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </section>
