@@ -1,3 +1,4 @@
+import path from 'path';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
 import { generateWithImagen } from '@/lib/generateWithImagen';
@@ -7,6 +8,11 @@ import { enforceCostGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { costGeminiText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
+import {
+  createStorageAdminClient,
+  uploadLocalAsset,
+  VIDEO_ASSETS_BUCKET,
+} from '@/lib/storage/videoAssets';
 import type { ImageGenMode, Orientation } from '@/types';
 
 export const maxDuration = 60;
@@ -23,13 +29,14 @@ export async function POST(req: Request) {
     const safety = await enforceCostGuardrails(auth.supabase, 'images/regenerate');
     if (!safety.ok) return safety.response!;
 
-    const { segmentId, prompt, mode, orientation, projectId, videoId } = (await req.json()) as {
+    const { segmentId, prompt, mode, orientation, projectId, videoId, segmentIndex } = (await req.json()) as {
       segmentId: string;
       prompt: string;
       mode: ImageGenMode;
       orientation: Orientation;
       projectId?: string;
       videoId?: string;
+      segmentIndex?: number;
     };
 
     if (!segmentId || !prompt || !mode) {
@@ -87,6 +94,39 @@ export async function POST(req: Request) {
         .maybeSingle();
 
       if (video) {
+        if (Number.isInteger(segmentIndex)) {
+          const assetClient = createStorageAdminClient() ?? auth.supabase;
+          const imageAsset = await uploadLocalAsset({
+            supabase: assetClient,
+            userId: auth.user.id,
+            projectId,
+            videoId,
+            folder: 'images',
+            localPath: localImagePath,
+            filename: `${String(segmentIndex! + 1).padStart(2, '0')}-${segmentId}-regen-${Date.now()}${path.extname(localImagePath) || '.jpg'}`,
+          });
+          const dbClient = createStorageAdminClient() ?? auth.supabase;
+          await dbClient.from('video_assets').insert({
+            user_id: auth.user.id,
+            account_id: auth.account.id,
+            project_id: projectId,
+            video_id: videoId,
+            kind: 'image',
+            segment_id: segmentId,
+            segment_index: segmentIndex,
+            storage_bucket: VIDEO_ASSETS_BUCKET,
+            storage_path: imageAsset.storagePath,
+            mime_type: imageAsset.mimeType,
+            size_bytes: imageAsset.sizeBytes,
+            prompt,
+            source: usedMode,
+            metadata: {
+              localImagePath,
+              generatedDuring: 'regenerate',
+            },
+          });
+        }
+
         const costLines: CostLine[] = [];
         if (usage.serperQueries > 0) {
           costLines.push({

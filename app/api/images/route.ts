@@ -1,3 +1,4 @@
+import path from 'path';
 import { generateImagePlans } from '@/lib/generateImagePlans';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
@@ -9,6 +10,11 @@ import { insertUsageEvents } from '@/lib/usage/record';
 import { requireAccountApi } from '@/lib/accounts';
 import { enforceCostGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
+import {
+  createStorageAdminClient,
+  uploadLocalAsset,
+  VIDEO_ASSETS_BUCKET,
+} from '@/lib/storage/videoAssets';
 import type { SegmentData, VideoSettings, ImageSource, ImageGenMode } from '@/types';
 
 export const maxDuration = 180;
@@ -263,6 +269,51 @@ export async function POST(req: Request) {
             });
           }
           await insertUsageEvents({ supabase, userId: user.id, accountId: account.id, projectId, videoId, lines: costLines, estimated: false });
+
+          const assetClient = createStorageAdminClient() ?? supabase;
+          const imageAssetRows = [];
+          for (const [index, segment] of updated.entries()) {
+            if (!segment.localImagePath) continue;
+            try {
+              const imageAsset = await uploadLocalAsset({
+                supabase: assetClient,
+                userId: user.id,
+                projectId,
+                videoId,
+                folder: 'images',
+                localPath: segment.localImagePath,
+                filename: `${String(index + 1).padStart(2, '0')}-${segment.id}-${Date.now()}${path.extname(segment.localImagePath) || '.jpg'}`,
+              });
+              imageAssetRows.push({
+                user_id: user.id,
+                account_id: account.id,
+                project_id: projectId,
+                video_id: videoId,
+                kind: 'image',
+                segment_id: segment.id,
+                segment_index: index,
+                storage_bucket: VIDEO_ASSETS_BUCKET,
+                storage_path: imageAsset.storagePath,
+                mime_type: imageAsset.mimeType,
+                size_bytes: imageAsset.sizeBytes,
+                prompt: segment.imagePrompt ?? null,
+                source: segment.imageGenMode ?? source,
+                metadata: {
+                  text: segment.text,
+                  keywords: segment.keywords,
+                  localImagePath: segment.localImagePath,
+                  generatedDuring: 'preview',
+                },
+              });
+            } catch (assetErr) {
+              console.warn(`[images asset ${index}]`, assetErr);
+            }
+          }
+          if (imageAssetRows.length > 0) {
+            const dbClient = createStorageAdminClient() ?? supabase;
+            await dbClient.from('video_assets').insert(imageAssetRows);
+          }
+
           await supabase
             .from('videos')
             .update({

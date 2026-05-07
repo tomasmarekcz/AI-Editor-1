@@ -379,12 +379,12 @@ export default function VideoDashboard({
   }, [activeVideoId, projectId]);
 
   // ── Regenerate single image (review step) ─────────────────────────────────
-  const handleRegenerate = useCallback(async (segId: string, prompt: string, mode: ImageGenMode) => {
+  const handleRegenerate = useCallback(async (segId: string, prompt: string, mode: ImageGenMode, segmentIndex: number) => {
     setRegeneratingIds((p) => new Set(p).add(segId));
     try {
       const res = await fetch('/api/images/regenerate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segmentId: segId, prompt, mode, orientation: settings.orientation }),
+        body: JSON.stringify({ segmentId: segId, prompt, mode, orientation: settings.orientation, projectId, videoId: activeVideoId, segmentIndex }),
       });
       const data = await res.json() as { localImagePath?: string; usedMode?: ImageGenMode; error?: string };
       if (!res.ok || data.error) throw new Error(data.error ?? await readApiError(res));
@@ -407,7 +407,7 @@ export default function VideoDashboard({
     } finally {
       setRegeneratingIds((p) => { const n = new Set(p); n.delete(segId); return n; });
     }
-  }, [settings.orientation]);
+  }, [activeVideoId, projectId, settings.orientation]);
 
   // ── Render queue ──────────────────────────────────────────────────────────
   const startRender = useCallback(async (segs: SegmentData[]) => {
@@ -1194,7 +1194,7 @@ export default function VideoDashboard({
                               Zrušit
                             </button>
                             <button
-                              onClick={() => handleRegenerate(seg.id, editPrompt, 'imagen')}
+                              onClick={() => handleRegenerate(seg.id, editPrompt, 'imagen', i)}
                               disabled={!editPrompt.trim() || isRegen}
                               className="flex-1 py-1.5 rounded text-[11px] bg-purple-700 hover:bg-purple-600 border border-purple-600 text-white disabled:opacity-40 transition-colors"
                             >

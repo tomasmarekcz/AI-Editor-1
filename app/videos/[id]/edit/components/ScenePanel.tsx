@@ -82,6 +82,7 @@ export function ScenePanel({
           segmentId: segment.id,
           videoId,
           projectId,
+          segmentIndex: segmentIdx,
           prompt: imagePrompt.trim(),
           mode: segment.imageGenMode ?? 'google',
           orientation: orientation ?? 'vertical',
