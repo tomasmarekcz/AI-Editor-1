@@ -1,7 +1,7 @@
 import { AppSidebar } from '@/app/components/layout/AppSidebar';
 import { requireAccountPage } from '@/lib/accounts';
 import { MembersPanel, type AccountInviteView, type AccountMemberView } from './MembersPanel';
-import { YouTubeIntegrationPanel, type YouTubeConnectionView } from './YouTubeIntegrationPanel';
+import { YouTubeIntegrationPanel, type IntegrationProjectView, type YouTubeConnectionView } from './YouTubeIntegrationPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +20,7 @@ export default async function SettingsPage() {
     .eq('id', user.id)
     .maybeSingle<Profile>();
 
-  const [{ data: members }, { data: invites }, { data: youtubeConnection }] = await Promise.all([
+  const [{ data: members }, { data: invites }, { data: projects }, { data: youtubeConnections }] = await Promise.all([
     supabase
       .from('account_members')
       .select('id,email,role,created_at,joined_at,user_id')
@@ -35,11 +35,16 @@ export default async function SettingsPage() {
           .order('created_at', { ascending: false })
       : Promise.resolve({ data: [] }),
     supabase
+      .from('projects')
+      .select('id,name')
+      .eq('account_id', account.id)
+      .order('created_at', { ascending: true }),
+    supabase
       .from('social_connections')
-      .select('id,status,platform_channel_title,platform_channel_url,last_verified_at,disconnected_at')
+      .select('id,project_id,status,platform_channel_title,platform_channel_url,last_verified_at,disconnected_at')
       .eq('account_id', account.id)
       .eq('platform', 'youtube')
-      .maybeSingle<YouTubeConnectionView>(),
+      .returns<YouTubeConnectionView[]>(),
   ]);
 
   return (
@@ -73,7 +78,8 @@ export default async function SettingsPage() {
           />
           <YouTubeIntegrationPanel
             isOwner={account.role === 'owner'}
-            connection={(youtubeConnection ?? null) as YouTubeConnectionView | null}
+            projects={(projects ?? []) as IntegrationProjectView[]}
+            connections={(youtubeConnections ?? []) as YouTubeConnectionView[]}
           />
         </div>
       </main>

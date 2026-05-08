@@ -3,7 +3,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
     const auth = await requireAccountApi();
     if (!auth.ok) return auth.response;
@@ -13,10 +13,24 @@ export async function POST() {
     const admin = createSupabaseAdminClient();
     if (!admin) return Response.json({ error: 'Supabase service role is not configured.' }, { status: 500 });
 
+    const body = await req.json().catch(() => ({})) as { projectId?: string };
+    const projectId = typeof body.projectId === 'string' ? body.projectId : '';
+    if (!projectId) return Response.json({ error: 'projectId is required.' }, { status: 400 });
+
+    const { data: project, error: projectError } = await auth.supabase
+      .from('projects')
+      .select('id')
+      .eq('id', projectId)
+      .eq('account_id', auth.account.id)
+      .maybeSingle<{ id: string }>();
+    if (projectError) return Response.json({ error: projectError.message }, { status: 500 });
+    if (!project) return Response.json({ error: 'Project not found.' }, { status: 404 });
+
     const { data: connection } = await admin
       .from('social_connections')
       .select('id')
       .eq('account_id', auth.account.id)
+      .eq('project_id', project.id)
       .eq('platform', 'youtube')
       .maybeSingle<{ id: string }>();
 
@@ -32,6 +46,7 @@ export async function POST() {
         updated_at: new Date().toISOString(),
       })
       .eq('account_id', auth.account.id)
+      .eq('project_id', project.id)
       .eq('platform', 'youtube');
 
     if (error) return Response.json({ error: error.message }, { status: 500 });

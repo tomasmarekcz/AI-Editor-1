@@ -35,6 +35,15 @@ export async function GET(req: Request) {
     const ownerError = requireOwner(account);
     if (ownerError) return settingsRedirect(req, 'error', 'Only workspace owners can connect YouTube.');
 
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', state.projectId)
+      .eq('account_id', account.id)
+      .maybeSingle<{ id: string }>();
+    if (projectError) throw new Error(projectError.message);
+    if (!project) return settingsRedirect(req, 'error', 'Project access could not be verified.');
+
     const admin = createSupabaseAdminClient();
     if (!admin) return settingsRedirect(req, 'error', 'Supabase service role is not configured.');
 
@@ -46,6 +55,7 @@ export async function GET(req: Request) {
       .from('social_connections')
       .upsert({
         account_id: account.id,
+        project_id: project.id,
         connected_by: user.id,
         platform: 'youtube',
         status: 'connected',
@@ -59,7 +69,7 @@ export async function GET(req: Request) {
         disconnected_at: null,
         error_message: null,
         updated_at: now,
-      }, { onConflict: 'account_id,platform' })
+      }, { onConflict: 'account_id,project_id,platform' })
       .select('id')
       .single<{ id: string }>();
 

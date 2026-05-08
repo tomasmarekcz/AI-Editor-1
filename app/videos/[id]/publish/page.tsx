@@ -58,6 +58,7 @@ export default async function PublishVideoPage({ params }: { params: { id: strin
       .from('social_connections')
       .select('id,status,platform_channel_title')
       .eq('account_id', account.id)
+      .eq('project_id', video.project_id)
       .eq('platform', 'youtube')
       .eq('status', 'connected')
       .maybeSingle<YouTubeConnection>(),
@@ -75,7 +76,7 @@ export default async function PublishVideoPage({ params }: { params: { id: strin
     ?? null;
   const thumbnailPath = video.thumbnail_path ?? fallbackThumbnailPath ?? null;
 
-  const videoPath = video.edited_video_path || video.final_video_path;
+  const videoPath = video.final_video_path;
   const [videoUrl, thumbnailUrl] = await Promise.all([
     createSignedUrl(assetClient, videoPath),
     createSignedUrl(assetClient, thumbnailPath),

@@ -25,21 +25,22 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const { data: video, error: videoError } = await auth.supabase
       .from('videos')
-      .select('id,account_id,title,edited_video_path,final_video_path,thumbnail_path,status')
+      .select('id,account_id,project_id,title,final_video_path,thumbnail_path,status')
       .eq('id', params.id)
       .eq('account_id', auth.account.id)
-      .maybeSingle<Pick<SavedVideo, 'id' | 'account_id' | 'title' | 'edited_video_path' | 'final_video_path' | 'thumbnail_path' | 'status'>>();
+      .maybeSingle<Pick<SavedVideo, 'id' | 'account_id' | 'project_id' | 'title' | 'final_video_path' | 'thumbnail_path' | 'status'>>();
 
     if (videoError) return Response.json({ error: videoError.message }, { status: 500 });
     if (!video) return Response.json({ error: 'Video not found.' }, { status: 404 });
 
-    const videoPath = video.edited_video_path || video.final_video_path;
+    const videoPath = video.final_video_path;
     if (!videoPath) return Response.json({ error: 'Final MP4 is not available yet.' }, { status: 400 });
 
     const { data: connection, error: connectionError } = await auth.supabase
       .from('social_connections')
       .select('id,status')
       .eq('account_id', auth.account.id)
+      .eq('project_id', video.project_id)
       .eq('platform', 'youtube')
       .eq('status', 'connected')
       .maybeSingle<{ id: string; status: string }>();
@@ -54,6 +55,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       .from('scheduled_posts')
       .insert({
         account_id: auth.account.id,
+        project_id: video.project_id,
         video_id: video.id,
         connection_id: connection.id,
         created_by: auth.user.id,

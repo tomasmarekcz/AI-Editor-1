@@ -17,6 +17,7 @@ type ProcessScheduledPostResult =
 type ScheduledPostJob = {
   id: string;
   account_id: string;
+  project_id: string;
   video_id: string;
   connection_id: string;
   platform: 'youtube';
@@ -116,6 +117,7 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
       supabase,
       videoId: post.video_id,
       accountId: post.account_id,
+      projectId: post.project_id,
       source: 'youtube-publish',
       event: 'start',
       message: 'Starting scheduled YouTube upload.',
@@ -137,6 +139,7 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
         .select('id,status,platform_channel_id,platform_channel_title')
         .eq('id', post.connection_id)
         .eq('account_id', post.account_id)
+        .eq('project_id', post.project_id)
         .eq('platform', 'youtube')
         .maybeSingle<{ id: string; status: string; platform_channel_id: string | null; platform_channel_title: string | null }>(),
       supabase
@@ -183,6 +186,7 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
           supabase,
           videoId: post.video_id,
           accountId: post.account_id,
+          projectId: post.project_id,
           source: 'youtube-publish',
           event: 'thumbnail_failed',
           level: 'warn',
@@ -197,6 +201,7 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
       supabase,
       videoId: post.video_id,
       accountId: post.account_id,
+      projectId: post.project_id,
       source: 'youtube-publish',
       event: 'published',
       message: 'Scheduled YouTube upload finished.',
@@ -215,6 +220,7 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
       supabase,
       videoId: post.video_id,
       accountId: post.account_id,
+      projectId: post.project_id,
       source: 'youtube-publish',
       event: 'failed',
       level: 'error',

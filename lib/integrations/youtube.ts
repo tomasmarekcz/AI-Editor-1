@@ -9,6 +9,7 @@ export const YOUTUBE_SCOPES = [
 type OAuthState = {
   accountId: string;
   userId: string;
+  projectId: string;
   nonce: string;
   createdAt: number;
 };
@@ -68,10 +69,11 @@ function signState(payload: string) {
   return crypto.createHmac('sha256', stateSecret()).update(payload).digest('base64url');
 }
 
-export function createYouTubeOAuthState(accountId: string, userId: string) {
+export function createYouTubeOAuthState(accountId: string, userId: string, projectId: string) {
   const state: OAuthState = {
     accountId,
     userId,
+    projectId,
     nonce: crypto.randomBytes(16).toString('base64url'),
     createdAt: Date.now(),
   };
@@ -95,7 +97,7 @@ export function verifyYouTubeOAuthState(rawState: string) {
   }
 
   const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as OAuthState;
-  if (!decoded.accountId || !decoded.userId || !decoded.createdAt) throw new Error('Invalid OAuth state payload.');
+  if (!decoded.accountId || !decoded.userId || !decoded.projectId || !decoded.createdAt) throw new Error('Invalid OAuth state payload.');
   if (Date.now() - decoded.createdAt > 15 * 60 * 1000) throw new Error('OAuth state has expired.');
   return decoded;
 }

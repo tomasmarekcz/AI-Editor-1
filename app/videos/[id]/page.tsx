@@ -89,6 +89,15 @@ export default async function VideoDetailPage({ params }: { params: { id: string
             <VideoRetryButton videoId={video.id} status={video.status} />
             {video.status === 'done' && (
               <>
+                {finalUrl && (
+                  <a
+                    href={finalUrl}
+                    download={`${video.title || 'video'}.mp4`}
+                    className="rounded-lg border border-emerald-700 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-200 transition hover:border-emerald-400 hover:bg-emerald-500/20 hover:text-white"
+                  >
+                    Stáhnout MP4
+                  </a>
+                )}
                 <Link
                   href={`/videos/${video.id}/publish`}
                   className="rounded-lg border border-purple-700 bg-purple-500/10 px-4 py-2 text-sm font-bold text-purple-200 transition hover:border-purple-400 hover:bg-purple-500/20 hover:text-white"
@@ -125,7 +134,16 @@ export default async function VideoDetailPage({ params }: { params: { id: string
                 Final video
               </h2>
               {finalUrl ? (
-                <video src={finalUrl} controls className="w-full rounded-lg bg-black" />
+                <div>
+                  <video src={finalUrl} controls className="w-full rounded-lg bg-black" />
+                  <a
+                    href={finalUrl}
+                    download={`${video.title || 'video'}.mp4`}
+                    className="mt-3 inline-flex rounded-lg bg-emerald-500 px-4 py-2 text-sm font-black text-gray-950 transition hover:bg-emerald-400"
+                  >
+                    Stáhnout MP4
+                  </a>
+                </div>
               ) : (
                 <div className="rounded-lg border border-gray-800 bg-gray-950 p-8 text-center text-sm text-gray-500">
                   Final MP4 is not available yet.
