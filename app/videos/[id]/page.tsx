@@ -91,8 +91,7 @@ export default async function VideoDetailPage({ params }: { params: { id: string
               <>
                 {finalUrl && (
                   <a
-                    href={finalUrl}
-                    download={`${video.title || 'video'}.mp4`}
+                    href={`/api/videos/${video.id}/download`}
                     className="rounded-lg border border-emerald-700 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-200 transition hover:border-emerald-400 hover:bg-emerald-500/20 hover:text-white"
                   >
                     Stáhnout MP4
@@ -137,8 +136,7 @@ export default async function VideoDetailPage({ params }: { params: { id: string
                 <div>
                   <video src={finalUrl} controls className="w-full rounded-lg bg-black" />
                   <a
-                    href={finalUrl}
-                    download={`${video.title || 'video'}.mp4`}
+                    href={`/api/videos/${video.id}/download`}
                     className="mt-3 inline-flex rounded-lg bg-emerald-500 px-4 py-2 text-sm font-black text-gray-950 transition hover:bg-emerald-400"
                   >
                     Stáhnout MP4

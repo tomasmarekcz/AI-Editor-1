@@ -1366,7 +1366,7 @@ export default function VideoDashboard({
             <video src={videoUrl} controls autoPlay loop className="w-full" />
           </div>
           <div className="flex gap-3 flex-wrap">
-            <a href={videoUrl} download="video.mp4"
+            <a href={savedVideoId ? `/api/videos/${savedVideoId}/download` : videoUrl}
               className="flex-1 py-3 bg-green-600 hover:bg-green-500 rounded-xl text-center font-semibold text-sm transition-colors min-w-[120px]">
               Stáhnout MP4
             </a>
