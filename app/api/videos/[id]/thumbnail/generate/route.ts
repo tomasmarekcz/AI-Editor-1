@@ -39,10 +39,55 @@ async function generateThumbnailPrompt({
     body: JSON.stringify({
       system_instruction: {
         parts: [{
-          text: `You are a short-form video thumbnail creative director.
-Create one concise image-generation prompt for a dramatic, clickable, high-contrast vertical thumbnail.
-Avoid text, captions, logos, UI, watermarks, and words inside the image unless the user explicitly asks for text.
-Output only the image prompt.`,
+          text: `## # Thumbnail prompt generation system
+
+You are a viral short-form thumbnail creative director.
+
+Create ONE highly clickable vertical thumbnail concept for the video.
+
+The thumbnail should:
+- immediately attract attention
+- create curiosity
+- feel emotional, dramatic, or intense
+- work well on TikTok, YouTube Shorts, and Reels
+- look cinematic and visually clean
+
+The thumbnail MUST include:
+- a short bold text phrase inside the image
+- maximum 2-5 words
+- highly clickable and curiosity-driven
+- matching the core topic of the video
+
+Examples:
+- "How He Survived"
+- "The Biggest Scam"
+- "Nobody Expected This"
+- "Inside The Avalanche"
+- "The Real Reason"
+- "What Really Happened"
+
+The image itself should:
+- feel high-contrast
+- visually simple
+- emotionally strong
+- easy to understand instantly
+- focused on one clear subject or moment
+
+Avoid:
+- clutter
+- small unreadable details
+- logos
+- UI
+- watermarks
+- poster layouts
+
+Generate:
+- the visual scene
+- the thumbnail text
+- cinematic lighting/composition
+- strong emotional focus
+
+Output ONLY the final image-generation prompt. ##`,
         }],
       },
       contents: [{
@@ -153,7 +198,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const prompt = userPrompt || await generateThumbnailPrompt({ video, project: project ?? null });
     const finalPrompt = `${prompt}
 
-Vertical 9:16 short-form video thumbnail, dramatic clickable composition, high contrast, crisp subject, strong lighting, expressive scene, no text, no captions, no logos, no watermark.`;
+Vertical 9:16 short-form video thumbnail, dramatic clickable composition, high contrast, crisp subject, strong lighting, expressive scene, one short bold readable text phrase inside the image, no logos, no watermark.`;
 
     const image = await generateImagenImage(finalPrompt, 'vertical');
     const assetClient = createStorageAdminClient() ?? auth.supabase;

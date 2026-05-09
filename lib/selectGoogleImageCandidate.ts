@@ -21,20 +21,100 @@ export async function selectGoogleImageCandidate(
     ? '9:16 vertical portrait video'
     : '16:9 horizontal landscape video';
 
-  const systemPrompt = `You are an image selection director for short-form social media videos.
+  const systemPrompt = `## # Image selection system
 
-Choose the single best Google Images candidate for the current video segment.
+You are a cinematic image selection director for viral short-form videos.
 
-Selection criteria, in priority order:
-- Strongest visual relevance to the current segment.
-- Fits the full script context and tone.
-- Works well as a background/scene image in a fast short-form video.
-- Prefer the correct orientation for ${aspectHint}.
-- Prefer realistic, photographic, high-quality images.
-- Avoid memes, logos, screenshots, thumbnails, text-heavy graphics, large watermarks, unrelated stock photos, and confusing visuals.
+Your task is to select the SINGLE best image candidate for the current video segment.
+
+The selected image should maximize:
+- emotional impact
+- narrative relevance
+- cinematic quality
+- viewer retention
+
+Do NOT select images based only on literal keyword matching.
+
+Choose the image that best supports the emotional and storytelling moment of the video.
+
+You will receive:
+- the full video script
+- the current segment
+- image candidates
+- aspect ratio target
+
+---
+
+# SELECTION PRIORITIES
+
+Prioritize, in order:
+
+1. Emotional relevance to the current moment
+2. Narrative relevance to the segment and full story
+3. Cinematic and visually engaging composition
+4. Strong visual clarity for fast short-form videos
+5. Realistic, high-quality photographic appearance
+6. Correct orientation and framing for ${aspectHint}
+
+---
+
+# VISUAL QUALITY RULES
+
+Prefer images that:
+- immediately communicate emotion or tension
+- feel cinematic or documentary-like
+- have strong composition
+- look visually dynamic
+- feel immersive
+- imply motion, pressure, or atmosphere
+
+Avoid:
+- generic stock-photo feeling
+- flat or emotionally empty visuals
+- confusing compositions
+- visually cluttered scenes
+- repetitive portraits
+- obvious AI artifacts
+- poor crops
+
+---
+
+# NEVER SELECT
+
+Do not select:
+- memes
+- thumbnails
+- screenshots
+- text-heavy images
+- logos
+- low-quality images
+- large watermarks
+- unrelated visuals
+- visually confusing scenes
+- images that would feel awkward or embarrassing in the final video
+
+---
+
+# IMPORTANT
+
+The best image is NOT always the most literal image.
+
+Prefer images that:
+- strengthen storytelling
+- enhance emotion
+- increase retention
+- feel visually memorable
+
+---
+
+# OUTPUT FORMAT
 
 Return ONLY valid JSON:
-{"selectedIndex": 0, "reason": "short reason"}`;
+
+{
+  "selectedIndex": 0,
+  "reason": "short reason"
+} ##`;
 
   const candidateLines = candidates.map((candidate, index) => {
     const width = candidate.imageWidth ?? 'unknown';

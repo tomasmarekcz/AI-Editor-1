@@ -217,6 +217,23 @@ export async function runVideoPipeline({
   const actualCostLines: CostLine[] = (scriptGenerationCostLines ?? [])
     .filter((line) => line.step === 'script_generation')
     .slice(0, 1);
+  let projectVisualStyle = '';
+  try {
+    const { data: project } = await supabase
+      .from('projects')
+      .select('visual_style,default_visual_prompt')
+      .eq('id', projectId)
+      .eq('account_id', accountId)
+      .maybeSingle<{ visual_style: string | null; default_visual_prompt: string | null }>();
+
+    projectVisualStyle = [
+      project?.visual_style,
+      project?.default_visual_prompt ? `Default visual prompt: ${project.default_visual_prompt}` : '',
+    ].filter(Boolean).join('\n');
+  } catch (err) {
+    await logPipeline('project_visual_style_lookup_failed', 'Could not load project visual style for image planning.', { err }, 'warn');
+  }
+
   const usage: Record<string, number> = {
     generatedImages: 0,
     regeneratedImages: 0,
@@ -243,8 +260,8 @@ export async function runVideoPipeline({
 
     let plans: ImagePlan[];
     try {
-      plans = await generateImagePlans(processed, imageSource, settings.orientation);
-      const inputTokens = Math.ceil(processed.map((s) => s.text).join('\n').length / 4) + 700;
+      plans = await generateImagePlans(processed, imageSource, settings.orientation, projectVisualStyle);
+      const inputTokens = Math.ceil((processed.map((s) => s.text).join('\n').length * (imageSource === 'hybrid' ? 1 : processed.length)) / 4) + 2000;
       const outputTokens = Math.ceil(JSON.stringify(plans).length / 4);
       actualCostLines.push({
         provider: 'google',

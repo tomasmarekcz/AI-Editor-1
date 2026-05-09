@@ -44,6 +44,22 @@ export async function POST(req: Request) {
   const safety = await enforceCostGuardrails(supabase, 'images');
   if (!safety.ok) return safety.response!;
 
+  let projectVisualStyle = '';
+
+  if (projectId) {
+    const { data: project } = await supabase
+      .from('projects')
+      .select('visual_style,default_visual_prompt')
+      .eq('id', projectId)
+      .eq('account_id', account.id)
+      .maybeSingle<{ visual_style: string | null; default_visual_prompt: string | null }>();
+
+    projectVisualStyle = [
+      project?.visual_style,
+      project?.default_visual_prompt ? `Default visual prompt: ${project.default_visual_prompt}` : '',
+    ].filter(Boolean).join('\n');
+  }
+
   if (projectId && videoId) {
     const { data: video } = await supabase
       .from('videos')
@@ -75,8 +91,8 @@ export async function POST(req: Request) {
 
         let plans;
         try {
-          plans = await generateImagePlans(segments, source, settings.orientation);
-          const inputTokens = Math.ceil(segments.map((s) => s.text).join('\n').length / 4) + 700;
+          plans = await generateImagePlans(segments, source, settings.orientation, projectVisualStyle);
+          const inputTokens = Math.ceil((segments.map((s) => s.text).join('\n').length * (source === 'hybrid' ? 1 : segments.length)) / 4) + 2000;
           const outputTokens = Math.ceil(JSON.stringify(plans).length / 4);
           costLines.push({
             provider: 'google',

@@ -73,14 +73,30 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       .eq('account_id', account.id)
       .maybeSingle<Pick<Project, 'id' | 'name' | 'niche'>>();
 
-    const systemPrompt = `You are an expert short-form social media caption writer.
-Create a short caption for a video that will be posted on Instagram Reels, YouTube Shorts, and TikTok.
+    const systemPrompt = `## # Caption generation system
+
+You are an expert short-form social media caption writer for TikTok, Instagram Reels, and YouTube Shorts.
+
+Write a short natural caption that:
+- creates curiosity
+- increases clicks/watch rate
+- feels native to social media
+- matches the emotional tone of the video
+
 The caption should:
-- include one curiosity-driven sentence that makes people want to watch the video
-- be short and natural
-- include exactly 6 hashtags
-- include a mix of broad hashtags like #fyp, #viral, #shorts and niche hashtags based on the video topic
-- output only the final caption, no explanation`;
+- be short and punchy
+- include one curiosity-driven sentence
+- avoid generic filler
+- feel emotionally engaging or intriguing
+- sound human and natural
+
+Include EXACTLY 6 hashtags:
+- mix broad hashtags like #fyp #viral #shorts
+- plus niche hashtags related to the video topic
+
+Do not over-explain the video.
+
+Output ONLY the final caption. ##`;
 
     const previousCaption = body.previousCaption?.trim();
     const userPrompt = `Full original_script:

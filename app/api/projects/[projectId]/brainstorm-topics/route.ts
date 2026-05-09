@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: { params: { projectId: stri
     const since = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
     const { data: recentVideos } = await supabase
       .from('videos')
-      .select('original_script,created_at')
+      .select('title,created_at')
       .eq('project_id', project.id)
       .eq('account_id', account.id)
       .gte('created_at', since)
@@ -49,8 +49,8 @@ export async function POST(req: Request, { params }: { params: { projectId: stri
       projectNiche: project.niche,
       projectLanguage: project.language,
       defaultProjectPrompt: project.default_project_prompt,
-      recentScripts: (recentVideos ?? [])
-        .map((video) => String(video.original_script ?? '').trim())
+      recentVideoTitles: (recentVideos ?? [])
+        .map((video) => String(video.title ?? '').trim())
         .filter(Boolean),
       rejectedTopics: (rejectedTopics ?? []).map(String).filter(Boolean),
     });
