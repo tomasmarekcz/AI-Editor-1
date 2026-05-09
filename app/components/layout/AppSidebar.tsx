@@ -38,7 +38,7 @@ export async function AppSidebar() {
         {(projects ?? []).map((project) => (
           <Link
             key={project.id}
-            href={`/dashboard?project=${project.id}`}
+            href={`/projects/${project.id}/create`}
             className="block rounded-lg px-3 py-2 text-sm text-gray-300 transition hover:bg-gray-900 hover:text-white"
           >
             {project.name}

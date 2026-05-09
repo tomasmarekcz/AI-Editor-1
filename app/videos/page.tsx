@@ -24,6 +24,7 @@ export type VideoListItem = {
   project_id: string;
   project_name: string | null;
   thumbnailUrl: string | null;
+  publishingStatus: 'published' | 'scheduled' | 'not_scheduled';
 };
 
 export default async function VideosPage({
@@ -69,12 +70,30 @@ export default async function VideosPage({
       .order('segment_index', { ascending: true })
       .order('created_at', { ascending: false })
     : { data: [] };
+  const { data: scheduledPosts } = videoIds.length > 0
+    ? await supabase
+      .from('scheduled_posts')
+      .select('video_id,status')
+      .eq('account_id', account.id)
+      .in('video_id', videoIds)
+      .in('status', ['scheduled', 'processing', 'published'])
+    : { data: [] };
 
   const previewPathByVideoId: Record<string, string> = {};
   for (const asset of previewAssets ?? []) {
     const videoId = String(asset.video_id);
     if (asset.kind === 'thumbnail' || !previewPathByVideoId[videoId]) {
       previewPathByVideoId[videoId] = String(asset.storage_path);
+    }
+  }
+
+  const publishingStatusByVideoId: Record<string, VideoListItem['publishingStatus']> = {};
+  for (const post of scheduledPosts ?? []) {
+    const videoId = String(post.video_id);
+    if (post.status === 'published') {
+      publishingStatusByVideoId[videoId] = 'published';
+    } else if (!publishingStatusByVideoId[videoId]) {
+      publishingStatusByVideoId[videoId] = 'scheduled';
     }
   }
 
@@ -85,6 +104,7 @@ export default async function VideosPage({
       thumbnailUrl: v.thumbnail_path || previewPathByVideoId[v.id]
         ? await createSignedUrl(assetClient, v.thumbnail_path ?? previewPathByVideoId[v.id], 3600)
         : null,
+      publishingStatus: publishingStatusByVideoId[v.id] ?? 'not_scheduled',
     })),
   );
 

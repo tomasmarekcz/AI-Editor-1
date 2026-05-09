@@ -7,6 +7,7 @@ import type { VideoListItem } from './page';
 import type { Project } from '@/lib/projects/types';
 
 type SortKey = 'newest' | 'oldest' | 'duration_desc' | 'duration_asc' | 'cost_desc';
+type PublishingFilter = 'all' | 'published' | 'scheduled' | 'not_scheduled';
 
 const STATUS_LABEL: Record<string, string> = {
   queued: 'Ve frontě',
@@ -36,6 +37,18 @@ const STATUS_COLOR: Record<string, string> = {
   uploading: 'bg-cyan-500/15 text-cyan-300',
 };
 
+const PUBLISHING_LABEL: Record<VideoListItem['publishingStatus'], string> = {
+  published: 'Publikováno',
+  scheduled: 'Naplánováno',
+  not_scheduled: 'Nenaplánováno',
+};
+
+const PUBLISHING_COLOR: Record<VideoListItem['publishingStatus'], string> = {
+  published: 'bg-emerald-500/15 text-emerald-300',
+  scheduled: 'bg-purple-500/15 text-purple-300',
+  not_scheduled: 'bg-gray-800/80 text-gray-400',
+};
+
 function formatDuration(sec: number | null): string {
   if (!sec) return '—';
   const m = Math.floor(sec / 60);
@@ -58,6 +71,7 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
   const router = useRouter();
   const [projectFilter, setProjectFilter] = useState<string>(initialProjectFilter ?? 'all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [publishingFilter, setPublishingFilter] = useState<PublishingFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
   const [search, setSearch] = useState('');
 
@@ -69,6 +83,9 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
     }
     if (statusFilter !== 'all') {
       list = list.filter((v) => v.status === statusFilter);
+    }
+    if (publishingFilter !== 'all') {
+      list = list.filter((v) => v.publishingStatus === publishingFilter);
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -97,7 +114,7 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
     }
 
     return list;
-  }, [videos, projectFilter, statusFilter, sortKey, search]);
+  }, [videos, projectFilter, statusFilter, publishingFilter, sortKey, search]);
 
   const activeProject = projects.find((p) => p.id === projectFilter);
 
@@ -172,6 +189,18 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
           <option value="rendering">Renderuje se</option>
         </select>
 
+        {/* Publishing filter */}
+        <select
+          value={publishingFilter}
+          onChange={(e) => setPublishingFilter(e.target.value as PublishingFilter)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none"
+        >
+          <option value="all">Vše publikace</option>
+          <option value="published">Publikováno</option>
+          <option value="scheduled">Naplánováno</option>
+          <option value="not_scheduled">Nenaplánováno</option>
+        </select>
+
         {/* Sort */}
         <select
           value={sortKey}
@@ -186,11 +215,12 @@ export function VideosClient({ videos, projects, initialProjectFilter }: Props) 
         </select>
 
         {/* Clear filters */}
-        {(projectFilter !== 'all' || statusFilter !== 'all' || search || sortKey !== 'newest') && (
+        {(projectFilter !== 'all' || statusFilter !== 'all' || publishingFilter !== 'all' || search || sortKey !== 'newest') && (
           <button
             onClick={() => {
               setProjectFilter('all');
               setStatusFilter('all');
+              setPublishingFilter('all');
               setSearch('');
               setSortKey('newest');
               router.replace('/videos', { scroll: false });
@@ -275,6 +305,9 @@ function VideoCard({ video }: { video: VideoListItem }) {
         {/* Status badge */}
         <span className={`absolute top-2 right-2 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_COLOR[video.status] ?? 'bg-gray-800 text-gray-400'}`}>
           {STATUS_LABEL[video.status] ?? video.status}
+        </span>
+        <span className={`absolute bottom-2 left-2 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${PUBLISHING_COLOR[video.publishingStatus]}`}>
+          {PUBLISHING_LABEL[video.publishingStatus]}
         </span>
         {/* Progress bar */}
         {video.status !== 'done' && video.status !== 'failed' && (
