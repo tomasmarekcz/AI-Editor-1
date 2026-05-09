@@ -261,6 +261,8 @@ function VideoCard({ video }: { video: VideoListItem }) {
   const [isRetrying, setIsRetrying] = useState(false);
   const canRetry = video.status === 'failed' || video.status === 'queued' || video.status === 'done';
   const detailHref = `/videos/${video.id}`;
+  const isInProgress = video.status !== 'done' && video.status !== 'failed';
+  const progressPct = Math.max(0, Math.min(100, Math.round(video.render_progress ?? 0)));
 
   async function retryRender() {
     setIsRetrying(true);
@@ -303,16 +305,23 @@ function VideoCard({ video }: { video: VideoListItem }) {
           </div>
         )}
         {/* Status badge */}
-        <span className={`absolute top-2 right-2 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_COLOR[video.status] ?? 'bg-gray-800 text-gray-400'}`}>
-          {STATUS_LABEL[video.status] ?? video.status}
-        </span>
+        <div className="absolute top-2 right-3 flex items-center gap-1.5">
+          <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_COLOR[video.status] ?? 'bg-gray-800 text-gray-400'}`}>
+            {STATUS_LABEL[video.status] ?? video.status}
+          </span>
+          {isInProgress && (
+            <span className="rounded bg-gray-950/80 px-2 py-0.5 text-[10px] font-black text-cyan-200 ring-1 ring-cyan-500/30">
+              {progressPct}%
+            </span>
+          )}
+        </div>
         <span className={`absolute bottom-2 left-2 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${PUBLISHING_COLOR[video.publishingStatus]}`}>
           {PUBLISHING_LABEL[video.publishingStatus]}
         </span>
         {/* Progress bar */}
-        {video.status !== 'done' && video.status !== 'failed' && (
+        {isInProgress && (
           <div className="absolute bottom-0 inset-x-0 h-1 bg-gray-800">
-            <div className="h-full bg-cyan-400" style={{ width: `${video.render_progress}%` }} />
+            <div className="h-full bg-cyan-400" style={{ width: `${progressPct}%` }} />
           </div>
         )}
       </div>
