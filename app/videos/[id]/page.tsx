@@ -6,6 +6,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSignedUrl } from '@/lib/storage/videoAssets';
 import { formatUsd } from '@/lib/pricing';
 import { VideoRetryButton } from './VideoRetryButton';
+import { YouTubeAnalyticsCard, type PublishedYouTubePostView, type YouTubeAnalyticsView } from './YouTubeAnalyticsCard';
 import type { Project, SavedVideo, VideoAsset } from '@/lib/projects/types';
 
 export const dynamic = 'force-dynamic';
@@ -34,7 +35,7 @@ export default async function VideoDetailPage({ params }: { params: { id: string
 
   const assetClient = createSupabaseAdminClient() ?? supabase;
 
-  const [{ data: project }, { data: assets }, { data: usageEvents }] = await Promise.all([
+  const [{ data: project }, { data: assets }, { data: usageEvents }, { data: publishedYouTubePost }] = await Promise.all([
     supabase
       .from('projects')
       .select('*')
@@ -53,7 +54,26 @@ export default async function VideoDetailPage({ params }: { params: { id: string
       .eq('video_id', video.id)
       .eq('account_id', account.id)
       .order('created_at', { ascending: true }),
+    supabase
+      .from('scheduled_posts')
+      .select('id,platform_post_id,platform_post_url')
+      .eq('video_id', video.id)
+      .eq('account_id', account.id)
+      .eq('platform', 'youtube')
+      .eq('status', 'published')
+      .not('platform_post_id', 'is', null)
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle<PublishedYouTubePostView>(),
   ]);
+
+  const { data: youtubeAnalytics } = publishedYouTubePost
+    ? await supabase
+        .from('social_post_analytics')
+        .select('id,views,likes,comments,shares,watch_time_minutes,average_view_duration_seconds,average_view_percentage,subscribers_gained,subscribers_lost,youtube_published_at,youtube_title,youtube_thumbnail_url,privacy_status,synced_at')
+        .eq('scheduled_post_id', publishedYouTubePost.id)
+        .maybeSingle<YouTubeAnalyticsView>()
+    : { data: null };
 
   const signedAssets = await Promise.all(
     ((assets ?? []) as VideoAsset[]).map(async (asset) => ({
@@ -190,6 +210,14 @@ export default async function VideoDetailPage({ params }: { params: { id: string
             </div>
           </div>
         </section>
+
+        {publishedYouTubePost && (
+          <YouTubeAnalyticsCard
+            videoId={video.id}
+            publishedPost={publishedYouTubePost as PublishedYouTubePostView}
+            initialAnalytics={(youtubeAnalytics ?? null) as YouTubeAnalyticsView | null}
+          />
+        )}
 
         <section className="mt-6 grid gap-6 lg:grid-cols-2">
           <div className="rounded-lg border border-gray-800 bg-gray-900/70 p-4">

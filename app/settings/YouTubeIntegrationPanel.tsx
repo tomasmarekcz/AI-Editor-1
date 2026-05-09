@@ -10,6 +10,7 @@ export type YouTubeConnectionView = {
   platform_channel_url: string | null;
   last_verified_at: string | null;
   disconnected_at: string | null;
+  scopes: string[] | null;
 };
 
 export type IntegrationProjectView = {
@@ -26,6 +27,8 @@ async function readApiError(res: Response) {
   }
 }
 
+const YOUTUBE_ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+
 export function YouTubeIntegrationPanel({
   isOwner,
   projects,
@@ -41,6 +44,7 @@ export function YouTubeIntegrationPanel({
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const connection = connections.find((item) => item.project_id === selectedProjectId && item.status === 'connected') ?? null;
   const isConnected = connection?.status === 'connected';
+  const needsAnalyticsReconnect = isConnected && !(connection.scopes ?? []).includes(YOUTUBE_ANALYTICS_SCOPE);
 
   async function disconnect() {
     if (!isOwner || isDisconnecting || !selectedProjectId) return;
@@ -108,6 +112,11 @@ export function YouTubeIntegrationPanel({
                   View channel
                 </a>
               )}
+              {needsAnalyticsReconnect && (
+                <p className="mt-3 rounded-lg border border-amber-700 bg-amber-500/10 px-3 py-2 text-sm leading-6 text-amber-100">
+                  Advanced YouTube analytics need one new permission. Reconnect YouTube to enable watch time, average view duration, shares, and subscriber metrics.
+                </p>
+              )}
               {!isOwner && (
                 <p className="mt-3 text-xs text-gray-500">
                   Only workspace owners can connect or disconnect project integrations.
@@ -117,14 +126,29 @@ export function YouTubeIntegrationPanel({
 
             <div className="flex shrink-0 flex-col gap-2 sm:min-w-44">
               {isConnected ? (
-                <button
-                  type="button"
-                  onClick={disconnect}
-                  disabled={!isOwner || isDisconnecting}
-                  className="rounded-lg border border-red-800 bg-red-500/10 px-4 py-2 text-sm font-black text-red-200 transition hover:border-red-500 hover:text-white disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
-                >
-                  {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
-                </button>
+                <>
+                  {needsAnalyticsReconnect && (
+                    <a
+                      href={isOwner && selectedProjectId ? `/api/integrations/youtube/connect?projectId=${selectedProjectId}` : '#'}
+                      aria-disabled={!isOwner || !selectedProjectId}
+                      className={`rounded-lg px-4 py-2 text-center text-sm font-black transition ${
+                        isOwner && selectedProjectId
+                          ? 'bg-amber-300 text-gray-950 hover:bg-amber-200'
+                          : 'pointer-events-none border border-gray-800 text-gray-600'
+                      }`}
+                    >
+                      Reconnect YouTube
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={disconnect}
+                    disabled={!isOwner || isDisconnecting}
+                    className="rounded-lg border border-red-800 bg-red-500/10 px-4 py-2 text-sm font-black text-red-200 transition hover:border-red-500 hover:text-white disabled:cursor-not-allowed disabled:border-gray-800 disabled:text-gray-600"
+                  >
+                    {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
+                  </button>
+                </>
               ) : (
                 <a
                   href={isOwner && selectedProjectId ? `/api/integrations/youtube/connect?projectId=${selectedProjectId}` : '#'}

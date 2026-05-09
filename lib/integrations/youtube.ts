@@ -4,7 +4,10 @@ import { encryptSecret } from '@/lib/integrations/tokenCrypto';
 export const YOUTUBE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube.readonly',
+  'https://www.googleapis.com/auth/yt-analytics.readonly',
 ];
+
+export const YOUTUBE_ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/yt-analytics.readonly';
 
 type OAuthState = {
   accountId: string;
@@ -53,6 +56,66 @@ type YouTubeVideoUploadResponse = {
     message?: string;
     errors?: unknown[];
   };
+};
+
+type YouTubeVideoListResponse = {
+  items?: {
+    id?: string;
+    snippet?: {
+      publishedAt?: string;
+      title?: string;
+      description?: string;
+      thumbnails?: Record<string, { url?: string; width?: number; height?: number }>;
+    };
+    statistics?: {
+      viewCount?: string;
+      likeCount?: string;
+      commentCount?: string;
+    };
+    status?: {
+      privacyStatus?: string;
+    };
+  }[];
+  error?: {
+    message?: string;
+  };
+};
+
+export type YouTubeDataApiVideoStats = {
+  raw: YouTubeVideoListResponse;
+  publishedAt: string | null;
+  title: string | null;
+  description: string | null;
+  thumbnailUrl: string | null;
+  privacyStatus: string | null;
+  views: number;
+  likes: number;
+  comments: number;
+};
+
+type YouTubeAnalyticsResponse = {
+  columnHeaders?: {
+    name?: string;
+    columnType?: string;
+    dataType?: string;
+  }[];
+  rows?: unknown[][];
+  error?: {
+    message?: string;
+  };
+};
+
+export type YouTubeAnalyticsMetrics = {
+  raw: YouTubeAnalyticsResponse;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  estimatedMinutesWatched: number | null;
+  averageViewDuration: number | null;
+  averageViewPercentage: number | null;
+  subscribersGained: number | null;
+  subscribersLost: number | null;
 };
 
 function requiredEnv(name: string) {
@@ -307,4 +370,135 @@ export async function uploadThumbnailToYouTube({
     const body = await res.text();
     throw new Error(`YouTube thumbnail upload failed with HTTP ${res.status}: ${body.slice(0, 500)}`);
   }
+}
+
+function numberFromUnknown(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function nullableNumberFromUnknown(value: unknown) {
+  if (value == null) return null;
+  const parsed = numberFromUnknown(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function bestThumbnailUrl(thumbnails?: Record<string, { url?: string; width?: number; height?: number }>) {
+  if (!thumbnails) return null;
+  const ranked = ['maxres', 'standard', 'high', 'medium', 'default'];
+  for (const key of ranked) {
+    const url = thumbnails[key]?.url;
+    if (url) return url;
+  }
+  return Object.values(thumbnails).find((thumbnail) => thumbnail.url)?.url ?? null;
+}
+
+export async function fetchYouTubeVideoStats(accessToken: string, videoId: string): Promise<YouTubeDataApiVideoStats> {
+  const url = new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.searchParams.set('part', 'statistics,snippet,status');
+  url.searchParams.set('id', videoId);
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json() as YouTubeVideoListResponse;
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message ?? `YouTube video statistics lookup failed with HTTP ${res.status}.`);
+  }
+
+  const item = data.items?.[0];
+  if (!item?.id) throw new Error('YouTube video was not found for analytics refresh.');
+
+  return {
+    raw: data,
+    publishedAt: item.snippet?.publishedAt ?? null,
+    title: item.snippet?.title ?? null,
+    description: item.snippet?.description ?? null,
+    thumbnailUrl: bestThumbnailUrl(item.snippet?.thumbnails),
+    privacyStatus: item.status?.privacyStatus ?? null,
+    views: numberFromUnknown(item.statistics?.viewCount),
+    likes: numberFromUnknown(item.statistics?.likeCount),
+    comments: numberFromUnknown(item.statistics?.commentCount),
+  };
+}
+
+function dateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+export function youtubeAnalyticsDateRange(publishedAt?: string | null) {
+  const end = new Date();
+  const fallbackStart = new Date(end);
+  fallbackStart.setUTCDate(fallbackStart.getUTCDate() - 28);
+
+  const publishedDate = publishedAt ? new Date(publishedAt) : null;
+  const start = publishedDate && !Number.isNaN(publishedDate.getTime()) && publishedDate < end
+    ? publishedDate
+    : fallbackStart;
+
+  return {
+    startDate: dateOnly(start),
+    endDate: dateOnly(end),
+  };
+}
+
+export async function fetchYouTubeAnalyticsMetrics({
+  accessToken,
+  videoId,
+  startDate,
+  endDate,
+}: {
+  accessToken: string;
+  videoId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<YouTubeAnalyticsMetrics> {
+  const metricNames = [
+    'views',
+    'likes',
+    'comments',
+    'shares',
+    'estimatedMinutesWatched',
+    'averageViewDuration',
+    'averageViewPercentage',
+    'subscribersGained',
+    'subscribersLost',
+  ];
+  const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports');
+  url.searchParams.set('ids', 'channel==MINE');
+  url.searchParams.set('startDate', startDate);
+  url.searchParams.set('endDate', endDate);
+  url.searchParams.set('metrics', metricNames.join(','));
+  url.searchParams.set('filters', `video==${videoId}`);
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json() as YouTubeAnalyticsResponse;
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message ?? `YouTube Analytics lookup failed with HTTP ${res.status}.`);
+  }
+
+  const firstRow = data.rows?.[0] ?? [];
+  const values = new Map<string, unknown>();
+  data.columnHeaders?.forEach((header, index) => {
+    if (header.name) values.set(header.name, firstRow[index]);
+  });
+
+  return {
+    raw: data,
+    views: nullableNumberFromUnknown(values.get('views')),
+    likes: nullableNumberFromUnknown(values.get('likes')),
+    comments: nullableNumberFromUnknown(values.get('comments')),
+    shares: nullableNumberFromUnknown(values.get('shares')),
+    estimatedMinutesWatched: nullableNumberFromUnknown(values.get('estimatedMinutesWatched')),
+    averageViewDuration: nullableNumberFromUnknown(values.get('averageViewDuration')),
+    averageViewPercentage: nullableNumberFromUnknown(values.get('averageViewPercentage')),
+    subscribersGained: nullableNumberFromUnknown(values.get('subscribersGained')),
+    subscribersLost: nullableNumberFromUnknown(values.get('subscribersLost')),
+  };
 }

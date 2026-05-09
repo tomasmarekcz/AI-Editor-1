@@ -41,7 +41,7 @@ export default async function SettingsPage() {
       .order('created_at', { ascending: true }),
     supabase
       .from('social_connections')
-      .select('id,project_id,status,platform_channel_title,platform_channel_url,last_verified_at,disconnected_at')
+      .select('id,project_id,status,platform_channel_title,platform_channel_url,last_verified_at,disconnected_at,scopes')
       .eq('account_id', account.id)
       .eq('platform', 'youtube')
       .returns<YouTubeConnectionView[]>(),
