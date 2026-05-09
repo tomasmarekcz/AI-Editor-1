@@ -14,7 +14,19 @@ function estimateDurations(segments: SegmentData[], totalDuration: number): numb
   const weights = segments.map((seg) => {
     const text = seg.audioText || seg.text;
     const words = tokenize(text).length;
-    return Math.max(1, words || Number(seg.duration) || 1);
+    const ellipsisPauses = (text.match(/\.\.\./g) ?? []).length;
+    const sentencePauses = (text.match(/[.!?]+/g) ?? []).length;
+    const commaPauses = (text.match(/[,;:—-]/g) ?? []).length;
+    const linePauses = (text.match(/\n+/g) ?? []).length;
+    const emphasisWords = (text.match(/\b[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}\b/g) ?? []).length;
+    const pauseWeight =
+      ellipsisPauses * 3.0 +
+      sentencePauses * 1.2 +
+      commaPauses * 0.45 +
+      linePauses * 1.5 +
+      emphasisWords * 0.35;
+
+    return Math.max(1, words + pauseWeight || Number(seg.duration) || 1);
   });
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
 
