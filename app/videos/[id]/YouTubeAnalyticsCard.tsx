@@ -18,6 +18,12 @@ export type YouTubeAnalyticsView = {
   youtube_thumbnail_url: string | null;
   privacy_status: string | null;
   synced_at: string | null;
+  raw_analytics_api_response?: {
+    skipped?: boolean;
+    reason?: string | null;
+    dailyViews?: { date: string; views: number }[];
+    dateRange?: { startDate?: string; endDate?: string };
+  } | null;
 };
 
 export type PublishedYouTubePostView = {
@@ -75,6 +81,82 @@ function Metric({
   );
 }
 
+function getDailyViews(analytics: YouTubeAnalyticsView | null) {
+  return analytics?.raw_analytics_api_response?.dailyViews ?? [];
+}
+
+function getPersistedAdvancedMessage(analytics: YouTubeAnalyticsView | null) {
+  if (!analytics?.raw_analytics_api_response?.skipped) return '';
+  return analytics.raw_analytics_api_response.reason || 'Advanced YouTube analytics are not available yet.';
+}
+
+function ViewsTrendChart({ points }: { points: { date: string; views: number }[] }) {
+  const maxViews = Math.max(1, ...points.map((point) => point.views));
+  const polyline = points.length > 0
+    ? points.map((point, index) => {
+        const x = points.length === 1 ? 50 : (index / (points.length - 1)) * 100;
+        const y = 92 - (point.views / maxViews) * 78;
+        return `${x},${y}`;
+      }).join(' ')
+    : '';
+
+  return (
+    <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-500">
+          Views trend
+        </p>
+        <p className="text-xs font-bold text-gray-500">
+          {points.length > 0 ? `${points[0].date} - ${points[points.length - 1].date}` : 'Daily data'}
+        </p>
+      </div>
+      <div className="mt-3 h-36">
+        {points.length > 0 ? (
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible">
+            <line x1="0" y1="92" x2="100" y2="92" stroke="rgb(31 41 55)" strokeWidth="1" />
+            <line x1="0" y1="53" x2="100" y2="53" stroke="rgb(31 41 55)" strokeWidth="0.7" />
+            <line x1="0" y1="14" x2="100" y2="14" stroke="rgb(31 41 55)" strokeWidth="0.7" />
+            <polyline
+              points={polyline}
+              fill="none"
+              stroke="rgb(248 113 113)"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {points.map((point, index) => {
+              const x = points.length === 1 ? 50 : (index / (points.length - 1)) * 100;
+              const y = 92 - (point.views / maxViews) * 78;
+              return (
+                <circle
+                  key={`${point.date}-${index}`}
+                  cx={x}
+                  cy={y}
+                  r="1.8"
+                  fill="rgb(254 202 202)"
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            })}
+          </svg>
+        ) : (
+          <div className="flex h-full items-center justify-center rounded border border-dashed border-gray-800 bg-gray-900 text-sm font-bold text-gray-600">
+            Refresh analytics to load the daily views trend.
+          </div>
+        )}
+      </div>
+      {points.length > 0 && (
+        <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+          <span>{points[0].date}</span>
+          <span className="font-bold text-gray-300">Peak {formatNumber(maxViews)} views/day</span>
+          <span>{points[points.length - 1].date}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function YouTubeAnalyticsCard({
   videoId,
   publishedPost,
@@ -88,9 +170,10 @@ export function YouTubeAnalyticsCard({
   const [youtubeUrl, setYoutubeUrl] = useState(publishedPost.platform_post_url);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [advancedMessage, setAdvancedMessage] = useState('');
+  const [advancedMessage, setAdvancedMessage] = useState(() => getPersistedAdvancedMessage(initialAnalytics));
   const hasAnalytics = Boolean(analytics?.synced_at);
   const buttonLabel = hasAnalytics ? 'Refresh analytics' : 'See analytics';
+  const dailyViews = getDailyViews(analytics);
 
   async function refreshAnalytics() {
     if (isRefreshing) return;
@@ -187,28 +270,7 @@ export function YouTubeAnalyticsCard({
             <Metric label="Subs lost" value={formatNumber(analytics?.subscribers_lost)} />
           </div>
 
-          <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950 p-3">
-            <div className="flex h-16 items-end gap-2">
-              {[analytics?.views, analytics?.likes, analytics?.comments, analytics?.shares].map((value, index) => {
-                const numericValue = value ?? 0;
-                const maxValue = Math.max(1, analytics?.views ?? 0);
-                const height = Math.max(10, Math.round((numericValue / maxValue) * 64));
-                return (
-                  <div
-                    key={index}
-                    className="w-full rounded-t bg-red-400/80"
-                    style={{ height }}
-                  />
-                );
-              })}
-            </div>
-            <div className="mt-2 grid grid-cols-4 text-center text-[10px] font-black uppercase tracking-[0.12em] text-gray-500">
-              <span>Views</span>
-              <span>Likes</span>
-              <span>Comments</span>
-              <span>Shares</span>
-            </div>
-          </div>
+          <ViewsTrendChart points={dailyViews} />
         </div>
       </div>
 

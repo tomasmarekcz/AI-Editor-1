@@ -3,6 +3,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { decryptSecret } from '@/lib/integrations/tokenCrypto';
 import {
   encryptedRefreshedAccessTokenRows,
+  fetchYouTubeAnalyticsDailyViews,
   fetchYouTubeAnalyticsMetrics,
   fetchYouTubeVideoStats,
   refreshYouTubeAccessToken,
@@ -136,24 +137,31 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const dataApiStats = await fetchYouTubeVideoStats(accessToken, post.platform_post_id);
     const hasAnalyticsScope = (connection.scopes ?? []).includes(YOUTUBE_ANALYTICS_SCOPE);
     let advancedAnalyticsError: string | null = null;
-    let needsReconnect = !hasAnalyticsScope;
+    let needsReconnect = false;
     let analyticsApiMetrics = null;
+    let dailyViews = null;
 
-    if (hasAnalyticsScope) {
-      try {
-        const { startDate, endDate } = youtubeAnalyticsDateRange(dataApiStats.publishedAt);
-        analyticsApiMetrics = await fetchYouTubeAnalyticsMetrics({
+    const { startDate, endDate } = youtubeAnalyticsDateRange(dataApiStats.publishedAt);
+    try {
+      const [metrics, trend] = await Promise.all([
+        fetchYouTubeAnalyticsMetrics({
           accessToken,
           videoId: post.platform_post_id,
           startDate,
           endDate,
-        });
-      } catch (err) {
-        advancedAnalyticsError = err instanceof Error ? err.message : String(err);
-        needsReconnect = /permission|scope|forbidden|insufficient|unauthorized|access/i.test(advancedAnalyticsError);
-      }
-    } else {
-      advancedAnalyticsError = readableAnalyticsPermissionMessage();
+        }),
+        fetchYouTubeAnalyticsDailyViews({
+          accessToken,
+          videoId: post.platform_post_id,
+          startDate,
+          endDate,
+        }),
+      ]);
+      analyticsApiMetrics = metrics;
+      dailyViews = trend;
+    } catch (err) {
+      advancedAnalyticsError = err instanceof Error ? err.message : String(err);
+      needsReconnect = !hasAnalyticsScope || /permission|scope|forbidden|insufficient|unauthorized|access/i.test(advancedAnalyticsError);
     }
 
     if (needsReconnect && !advancedAnalyticsError) {
@@ -182,9 +190,16 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
       youtube_thumbnail_url: dataApiStats.thumbnailUrl,
       privacy_status: dataApiStats.privacyStatus,
       raw_data_api_response: dataApiStats.raw,
-      raw_analytics_api_response: analyticsApiMetrics?.raw ?? {
+      raw_analytics_api_response: analyticsApiMetrics?.raw ? {
+        totals: analyticsApiMetrics.raw,
+        dailyViews: dailyViews?.points ?? [],
+        dailyViewsRaw: dailyViews?.raw ?? {},
+        dateRange: { startDate, endDate },
+      } : {
         skipped: true,
         reason: advancedAnalyticsError,
+        dailyViews: [],
+        dateRange: { startDate, endDate },
       },
       synced_at: now,
       updated_at: now,

@@ -118,6 +118,11 @@ export type YouTubeAnalyticsMetrics = {
   subscribersLost: number | null;
 };
 
+export type YouTubeAnalyticsDailyView = {
+  date: string;
+  views: number;
+};
+
 function requiredEnv(name: string) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not set.`);
@@ -501,4 +506,40 @@ export async function fetchYouTubeAnalyticsMetrics({
     subscribersGained: nullableNumberFromUnknown(values.get('subscribersGained')),
     subscribersLost: nullableNumberFromUnknown(values.get('subscribersLost')),
   };
+}
+
+export async function fetchYouTubeAnalyticsDailyViews({
+  accessToken,
+  videoId,
+  startDate,
+  endDate,
+}: {
+  accessToken: string;
+  videoId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<{ raw: YouTubeAnalyticsResponse; points: YouTubeAnalyticsDailyView[] }> {
+  const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports');
+  url.searchParams.set('ids', 'channel==MINE');
+  url.searchParams.set('startDate', startDate);
+  url.searchParams.set('endDate', endDate);
+  url.searchParams.set('metrics', 'views');
+  url.searchParams.set('dimensions', 'day');
+  url.searchParams.set('filters', `video==${videoId}`);
+  url.searchParams.set('sort', 'day');
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json() as YouTubeAnalyticsResponse;
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message ?? `YouTube daily analytics lookup failed with HTTP ${res.status}.`);
+  }
+
+  const points = (data.rows ?? []).map((row) => ({
+    date: String(row[0] ?? ''),
+    views: numberFromUnknown(row[1]),
+  })).filter((point) => point.date);
+
+  return { raw: data, points };
 }

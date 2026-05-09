@@ -70,7 +70,7 @@ export default async function VideoDetailPage({ params }: { params: { id: string
   const { data: youtubeAnalytics } = publishedYouTubePost
     ? await supabase
         .from('social_post_analytics')
-        .select('id,views,likes,comments,shares,watch_time_minutes,average_view_duration_seconds,average_view_percentage,subscribers_gained,subscribers_lost,youtube_published_at,youtube_title,youtube_thumbnail_url,privacy_status,synced_at')
+        .select('id,views,likes,comments,shares,watch_time_minutes,average_view_duration_seconds,average_view_percentage,subscribers_gained,subscribers_lost,youtube_published_at,youtube_title,youtube_thumbnail_url,privacy_status,synced_at,raw_analytics_api_response')
         .eq('scheduled_post_id', publishedYouTubePost.id)
         .maybeSingle<YouTubeAnalyticsView>()
     : { data: null };
