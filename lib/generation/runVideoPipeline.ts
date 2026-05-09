@@ -577,7 +577,7 @@ export async function runVideoPipeline({
     costUsd: roundCost((audioDurationSeconds / 60) * PRICING.openai['whisper-1'].usdPerMinute),
   });
 
-  mapSTTToSegments(sttWords, processed);
+  mapSTTToSegments(sttWords, processed, audioDurationSeconds);
 
   const subtitlesJson = {
     segments: processed,

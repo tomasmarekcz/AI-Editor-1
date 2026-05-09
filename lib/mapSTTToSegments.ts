@@ -10,6 +10,41 @@ function tokenize(text: string): string[] {
   return text.trim().split(/\s+/).map(normalize).filter(Boolean);
 }
 
+function estimateDurations(segments: SegmentData[], totalDuration: number): number[] {
+  const weights = segments.map((seg) => {
+    const text = seg.audioText || seg.text;
+    const words = tokenize(text).length;
+    return Math.max(1, words || Number(seg.duration) || 1);
+  });
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+
+  return weights.map((weight, index) => {
+    const proportional = totalDuration * (weight / totalWeight);
+    const fallback = Number(segments[index].duration) || proportional;
+    return Math.max(0.5, Number.isFinite(proportional) ? proportional : fallback);
+  });
+}
+
+function applyEstimatedTimings(
+  segments: SegmentData[],
+  totalDuration: number,
+  clearWordTimings: boolean,
+): void {
+  const durations = estimateDurations(segments, totalDuration);
+  let cursor = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const isLast = i === segments.length - 1;
+    const end = isLast ? totalDuration : Math.min(totalDuration, cursor + durations[i]);
+    seg.startTime = cursor;
+    seg.endTime = Math.max(cursor + 0.1, end);
+    seg.audioDuration = seg.endTime - seg.startTime;
+    if (clearWordTimings) seg.wordTimings = undefined;
+    cursor = seg.endTime;
+  }
+}
+
 /**
  * Maps global word-level STT timestamps to each segment.
  *
@@ -26,34 +61,41 @@ function tokenize(text: string): string[] {
 export function mapSTTToSegments(
   sttWords: WordTiming[],
   segments: SegmentData[],
+  audioDurationSeconds?: number,
 ): void {
+  const fallbackTotalDuration = audioDurationSeconds
+    ?? segments.reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
+
   // ── Fallback when STT failed or returned nothing ──────────────────────────
   if (!sttWords.length) {
-    let cursor = 0;
-    for (const seg of segments) {
-      const dur = seg.audioDuration ?? seg.duration;
-      seg.startTime = cursor;
-      seg.endTime   = cursor + dur;
-      cursor        = seg.endTime;
-      seg.wordTimings = undefined;
-    }
+    applyEstimatedTimings(segments, Math.max(fallbackTotalDuration, segments.length), true);
     return;
   }
 
   let sttIdx = 0;
+  let totalMatched = 0;
+  let totalExpected = 0;
+  let usedFallback = false;
+  const totalAudioDuration = sttWords[sttWords.length - 1]?.end
+    ?? fallbackTotalDuration;
 
   for (let si = 0; si < segments.length; si++) {
     const seg      = segments[si];
-    const segWords = tokenize(seg.text);
-    const isLast   = si === segments.length - 1;
+    const segWords = tokenize(seg.audioText || seg.text);
+    totalExpected += segWords.length;
 
     // Absolute start of this segment = timestamp of first STT word we consume
     const segStart = sttWords[sttIdx]?.start ?? 0;
     const relativeTimings: WordTiming[] = [];
     let matched = 0;
+    const startIdx = sttIdx;
+    const maxScan = Math.min(
+      sttWords.length,
+      startIdx + Math.max(segWords.length * 3, segWords.length + 12),
+    );
 
     // Walk STT words, matching them against the segment's words in order
-    while (matched < segWords.length && sttIdx < sttWords.length) {
+    while (matched < segWords.length && sttIdx < maxScan) {
       const sttNorm = normalize(sttWords[sttIdx].word);
       const segNorm = segWords[matched];
 
@@ -75,6 +117,13 @@ export function mapSTTToSegments(
       // Always advance STT cursor (skip unmatched STT words — noise / filler)
       sttIdx++;
     }
+    totalMatched += matched;
+
+    const matchRatio = segWords.length > 0 ? matched / segWords.length : 1;
+    if (segWords.length > 0 && matchRatio < 0.35) {
+      usedFallback = true;
+      break;
+    }
 
     // Absolute end: timestamp of the last word we consumed
     const lastConsumedEnd = sttWords[Math.min(sttIdx - 1, sttWords.length - 1)]?.end
@@ -83,7 +132,18 @@ export function mapSTTToSegments(
     seg.startTime    = segStart;
     seg.endTime      = lastConsumedEnd;
     seg.audioDuration = lastConsumedEnd - segStart;
-    seg.wordTimings  = relativeTimings.length > 0 ? relativeTimings : undefined;
+    seg.wordTimings  = matchRatio >= 0.6 && relativeTimings.length > 0 ? relativeTimings : undefined;
+  }
+
+  const overallMatchRatio = totalExpected > 0 ? totalMatched / totalExpected : 0;
+  if (usedFallback || overallMatchRatio < 0.5) {
+    console.warn('[mapSTTToSegments] Low STT alignment confidence; using estimated segment timings.', {
+      matched: totalMatched,
+      expected: totalExpected,
+      ratio: overallMatchRatio,
+    });
+    applyEstimatedTimings(segments, totalAudioDuration, true);
+    return;
   }
 
   // Any remaining STT words after the last segment → stretch last segment's endTime
