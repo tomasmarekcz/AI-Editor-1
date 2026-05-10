@@ -57,6 +57,53 @@ function applyEstimatedTimings(
   }
 }
 
+function mapByWhisperWordOrder(
+  sttWords: WordTiming[],
+  segments: SegmentData[],
+): boolean {
+  const expectedCounts = segments.map((seg) => tokenize(seg.audioText || seg.text).length);
+  const totalExpected = expectedCounts.reduce((sum, count) => sum + count, 0);
+
+  if (totalExpected <= 0 || sttWords.length < segments.length) return false;
+
+  let wordCursor = 0;
+  let expectedCursor = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    expectedCursor += expectedCounts[i];
+
+    const nextWordCursor = i === segments.length - 1
+      ? sttWords.length
+      : Math.max(
+        wordCursor + 1,
+        Math.min(
+          sttWords.length - (segments.length - i - 1),
+          Math.round((expectedCursor / totalExpected) * sttWords.length),
+        ),
+      );
+
+    const slice = sttWords.slice(wordCursor, nextWordCursor);
+    if (!slice.length) return false;
+
+    const start = i === 0 ? 0 : slice[0].start;
+    const end = slice[slice.length - 1].end;
+
+    seg.startTime = start;
+    seg.endTime = Math.max(start + 0.1, end);
+    seg.audioDuration = seg.endTime - seg.startTime;
+    seg.wordTimings = slice.map((word) => ({
+      word: word.word,
+      start: Math.max(0, word.start - start),
+      end: Math.max(0, word.end - start),
+    }));
+
+    wordCursor = nextWordCursor;
+  }
+
+  return true;
+}
+
 /**
  * Maps global word-level STT timestamps to each segment.
  *
@@ -81,6 +128,10 @@ export function mapSTTToSegments(
   // ── Fallback when STT failed or returned nothing ──────────────────────────
   if (!sttWords.length) {
     applyEstimatedTimings(segments, Math.max(fallbackTotalDuration, segments.length), true);
+    return;
+  }
+
+  if (mapByWhisperWordOrder(sttWords, segments)) {
     return;
   }
 
