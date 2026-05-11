@@ -1,5 +1,7 @@
 import type { VideoSettings } from '@/types';
+import type { Orientation } from '@/types';
 import { OPENAI_SCRIPT_GENERATION_MODEL } from '@/lib/models';
+import { OPENAI_IMAGE_MODEL, OPENAI_IMAGE_QUALITY, openAIImageSizeForOrientation } from '@/lib/generateWithOpenAIImage';
 
 export const PRICING = {
   openai: {
@@ -13,6 +15,18 @@ export const PRICING = {
       audioOutputUsdPer1MTokens: 12.0,
       estimatedUsdPerMinute: 0.015,
     },
+    [OPENAI_IMAGE_MODEL]: {
+      textInputUsdPer1MTokens: 5.00,
+      textCachedInputUsdPer1MTokens: 1.25,
+      imageInputUsdPer1MTokens: 8.00,
+      imageCachedInputUsdPer1MTokens: 2.00,
+      imageOutputUsdPer1MTokens: 30.00,
+      lowUsdBySize: {
+        '1024x1024': 0.006,
+        '1024x1536': 0.005,
+        '1536x1024': 0.005,
+      },
+    },
   },
   google: {
     'gemini-2.5-flash-lite': { inputUsdPer1MTokens: 0.10, outputUsdPer1MTokens: 0.40 },
@@ -21,7 +35,6 @@ export const PRICING = {
       audioOutputUsdPer1MTokens: 10.0,
       estimatedUsdPerMinute: 0.012,
     },
-    'imagen-4.0-generate-001': { usdPerImage: 0.04 },
   },
   serper: {
     imagesSearchUsdPerQuery: 0.001,
@@ -85,6 +98,22 @@ export function costOpenAIModelText(model: keyof typeof PRICING.openai, inputTok
 export function costGeminiText(inputTokens: number, outputTokens: number) {
   const p = PRICING.google['gemini-2.5-flash-lite'];
   return roundCost((inputTokens / 1_000_000) * p.inputUsdPer1MTokens + (outputTokens / 1_000_000) * p.outputUsdPer1MTokens);
+}
+
+export function costOpenAIImage2Low(images: number, orientation: Orientation) {
+  const size = openAIImageSizeForOrientation(orientation) as keyof typeof PRICING.openai[typeof OPENAI_IMAGE_MODEL]['lowUsdBySize'];
+  const p = PRICING.openai[OPENAI_IMAGE_MODEL];
+  return roundCost(images * (p.lowUsdBySize[size] ?? p.lowUsdBySize['1024x1024']));
+}
+
+export function openAIImage2Usage(images: number, orientation: Orientation) {
+  return {
+    images,
+    model: OPENAI_IMAGE_MODEL,
+    quality: OPENAI_IMAGE_QUALITY,
+    size: openAIImageSizeForOrientation(orientation),
+    estimated: true,
+  };
 }
 
 export function estimateScriptGenerationCost({
@@ -164,11 +193,11 @@ export function estimateVideoCost(
 
   if (imagenImages > 0) {
     lines.push({
-      provider: 'google',
-      model: 'imagen-4.0-generate-001',
+      provider: 'openai',
+      model: OPENAI_IMAGE_MODEL,
       step: 'image_generation',
-      usage: { estimatedImages: imagenImages },
-      costUsd: roundCost(imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+      usage: openAIImage2Usage(imagenImages, settings.orientation),
+      costUsd: costOpenAIImage2Low(imagenImages, settings.orientation),
     });
   }
 
@@ -259,7 +288,7 @@ export function estimateVideoCost(
       estimatedTokens: tokens,
       estimatedSegments: segmentCount,
       estimatedAudioSeconds: audioSeconds,
-      estimatedImagenImages: imagenImages,
+      estimatedAiImages: imagenImages,
       estimatedSerperQueries: serperQueries,
     },
   };

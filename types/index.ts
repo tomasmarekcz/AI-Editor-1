@@ -86,10 +86,12 @@ export interface SegmentData {
   startTime?: number;
   /** Absolute end time in the full voiceover audio (seconds) — set by mapSTTToSegments */
   endTime?: number;
-  /** Gemini-generated search query or Imagen generation prompt */
+  /** Gemini-generated search query or AI image generation prompt */
   imagePrompt?: string;
   /** Which mode was used to obtain this image (for hybrid) */
   imageGenMode?: ImageGenMode;
+  /** Short user-facing note when the original planned image route failed and a fallback was used. */
+  imageFallbackReason?: string;
   /** Ken Burns preset index override (0-4). Falls back to segment position if unset. */
   kbPreset?: 0 | 1 | 2 | 3 | 4;
   /** Scene transition style. Defaults to 'fade'. */
@@ -107,7 +109,8 @@ export interface VideoInputProps {
 
 export type PipelineEvent =
   | { type: 'step'; step: string; message: string; total?: number }
-  | { type: 'image_ready'; index: number; imageUrl: string }
+  | { type: 'image_ready'; index: number; imageUrl: string; prompt?: string; mode?: ImageGenMode; attempts?: number; fallbackReason?: string }
+  | { type: 'image_failed'; index: number; prompt?: string; mode?: ImageGenMode; error?: string }
   | { type: 'audio_ready'; index: number }
   | { type: 'effects_ready'; effects: VideoEffect[] }
   | { type: 'render_progress'; progress: number }

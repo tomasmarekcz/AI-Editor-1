@@ -73,7 +73,7 @@ const TEXT_COLORS = [
 
 const IMAGE_SOURCES = [
   { id: 'google' as const,  icon: '🔍', label: 'Google',    desc: 'Automatické vyhledávání' },
-  { id: 'imagen' as const,  icon: '🎨', label: 'AI Obr.',   desc: 'Imagen 4 generování' },
+  { id: 'imagen' as const,  icon: '🎨', label: 'AI Obr.',   desc: 'GPT Image 2 low generování' },
   { id: 'hybrid' as const,  icon: '⚡', label: 'Hybrid',    desc: 'Gemini rozhodne' },
   { id: 'upload' as const,  icon: '📂', label: 'Vlastní',   desc: 'Nahrát ručně' },
 ];
@@ -93,6 +93,7 @@ const DEFAULT_SETTINGS: VideoSettings = DEFAULT_VIDEO_SETTINGS;
 // ── Types ──────────────────────────────────────────────────────────────────
 type AppStep = 'idle' | 'segmenting' | 'generating-images' | 'awaiting-review' | 'awaiting-uploads' | 'queued' | 'rendering' | 'done' | 'error';
 interface SegmentState extends SegmentData { uploadPreviewUrl?: string; uploading?: boolean; imageError?: string; reviewing?: boolean; attempts?: number }
+type ImageLightboxState = { src: string; label: string; fallbackReason?: string } | null;
 
 // ── Small helpers ──────────────────────────────────────────────────────────
 function Toggle({ active, onClick, children }: {
@@ -153,6 +154,7 @@ export default function VideoDashboard({
   const [settingsSaveMsg, setSettingsSaveMsg] = useState('');
   const [hasSavedFirstVideoDefaults, setHasSavedFirstVideoDefaults] = useState(!shouldSaveFirstVideoDefaults);
   const [showFontModal, setShowFontModal] = useState(false);
+  const [imageLightbox, setImageLightbox] = useState<ImageLightboxState>(null);
 
   // Review-step state
   const [editingPrompts, setEditingPrompts] = useState<Record<string, string>>({});
@@ -312,7 +314,7 @@ export default function VideoDashboard({
             } else if (ev.type === 'image_ready') {
               setSegments((p) => p.map((s, i) =>
                 i === ev.index
-                  ? { ...s, localImagePath: ev.imageUrl, imagePrompt: ev.prompt, imageGenMode: ev.mode, reviewing: false, attempts: ev.attempts as number | undefined }
+                  ? { ...s, localImagePath: ev.imageUrl, imagePrompt: ev.prompt, imageGenMode: ev.mode, imageFallbackReason: ev.fallbackReason as string | undefined, reviewing: false, attempts: ev.attempts as number | undefined }
                   : s,
               ));
             } else if (ev.type === 'image_failed') {
@@ -328,6 +330,7 @@ export default function VideoDashboard({
                 ...s,
                 uploadPreviewUrl: prev[i]?.uploadPreviewUrl,
                 imageError: s.localImagePath ? undefined : prev[i]?.imageError,
+                imageFallbackReason: s.imageFallbackReason ?? prev[i]?.imageFallbackReason,
               })));
               setStep('awaiting-review');
             } else if (ev.type === 'error') {
@@ -985,6 +988,32 @@ export default function VideoDashboard({
     </div>
   );
 
+  const renderImageLightbox = () => imageLightbox ? (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+      onClick={() => setImageLightbox(null)}
+    >
+      <div className="relative w-[75vw] max-w-6xl max-h-[82vh]" onClick={(event) => event.stopPropagation()}>
+        <button
+          onClick={() => setImageLightbox(null)}
+          className="absolute -top-10 right-0 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800"
+        >
+          Zavřít
+        </button>
+        <img
+          src={imageLightbox.src}
+          alt={imageLightbox.label}
+          className="max-h-[82vh] w-full rounded-xl border border-gray-800 bg-gray-950 object-contain shadow-2xl"
+        />
+        {imageLightbox.fallbackReason && (
+          <div className="absolute right-3 top-3 rounded-md bg-red-700 px-2.5 py-1 text-xs font-semibold text-white shadow-lg" title={imageLightbox.fallbackReason}>
+            Fallback
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   // ── Upload mode ────────────────────────────────────────────────────────────
   if (step === 'awaiting-uploads') {
     return (
@@ -1074,9 +1103,21 @@ export default function VideoDashboard({
           {segments.length > 0 && (
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
               {segments.map((seg, i) => (
-                <div key={seg.id ?? i} className="aspect-video bg-gray-900 rounded-lg overflow-hidden relative border border-gray-800">
+                <div
+                  key={seg.id ?? i}
+                  className="aspect-video bg-gray-900 rounded-lg overflow-hidden relative border border-gray-800"
+                  onClick={() => {
+                    if (seg.localImagePath && !seg.reviewing) {
+                      setImageLightbox({
+                        src: seg.uploadPreviewUrl ?? seg.localImagePath,
+                        label: `Obrázek ${i + 1}`,
+                        fallbackReason: seg.imageFallbackReason,
+                      });
+                    }
+                  }}
+                >
                   {seg.localImagePath && !seg.reviewing
-                    ? <img src={seg.uploadPreviewUrl ?? seg.localImagePath} alt="" className="w-full h-full object-cover" />
+                    ? <img src={seg.uploadPreviewUrl ?? seg.localImagePath} alt="" className="w-full h-full object-cover cursor-zoom-in" />
                     : <div className="w-full h-full flex flex-col items-center justify-center gap-1">
                         <Spinner size={3} />
                         {seg.reviewing && (
@@ -1087,6 +1128,14 @@ export default function VideoDashboard({
                   {seg.imageGenMode && !seg.reviewing && (
                     <span className={`absolute top-0.5 left-0.5 text-[8px] px-1 rounded text-white ${MODE_META[seg.imageGenMode].color}`}>
                       {MODE_META[seg.imageGenMode].icon}
+                    </span>
+                  )}
+                  {seg.imageFallbackReason && !seg.reviewing && (
+                    <span
+                      className="absolute top-0.5 right-0.5 text-[8px] px-1 rounded bg-red-700 text-white"
+                      title={seg.imageFallbackReason}
+                    >
+                      Fallback
                     </span>
                   )}
                   {seg.reviewing && (
@@ -1101,6 +1150,7 @@ export default function VideoDashboard({
               ))}
             </div>
           )}
+          {renderImageLightbox()}
         </div>
       </main>
     );
@@ -1151,14 +1201,25 @@ export default function VideoDashboard({
                 <div key={seg.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
 
                   {/* Thumbnail */}
-                  <div className="aspect-video relative bg-gray-800 flex-shrink-0">
+                  <div
+                    className="aspect-video relative bg-gray-800 flex-shrink-0"
+                    onClick={() => {
+                      if (thumbSrc && !isRegen) {
+                        setImageLightbox({
+                          src: thumbSrc,
+                          label: `Obrázek ${i + 1}`,
+                          fallbackReason: seg.imageFallbackReason,
+                        });
+                      }
+                    }}
+                  >
                     {isRegen ? (
                       <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-500">
                         <Spinner size={5} />
                         <span className="text-[10px]">Hledám...</span>
                       </div>
                     ) : thumbSrc ? (
-                      <img src={thumbSrc} alt="" className="w-full h-full object-cover" />
+                      <img src={thumbSrc} alt="" className="w-full h-full object-cover cursor-zoom-in" />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center gap-1 p-2">
                         <span className="text-yellow-500 text-base">⚠</span>
@@ -1172,9 +1233,22 @@ export default function VideoDashboard({
                     <span className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1.5 rounded font-mono">
                       #{i + 1}
                     </span>
-                    {mode && !isRegen && (
+                    {mode && !isRegen && !seg.imageFallbackReason && (
                       <span className={`absolute top-1 right-1 text-[9px] px-1.5 py-0.5 rounded text-white ${MODE_META[mode].color}`}>
                         {MODE_META[mode].icon} {MODE_META[mode].label}
+                      </span>
+                    )}
+                    {mode && !isRegen && seg.imageFallbackReason && (
+                      <span className={`absolute bottom-1 right-1 text-[9px] px-1.5 py-0.5 rounded text-white ${MODE_META[mode].color}`}>
+                        {MODE_META[mode].icon} {MODE_META[mode].label}
+                      </span>
+                    )}
+                    {seg.imageFallbackReason && !isRegen && (
+                      <span
+                        className="absolute top-1 right-1 rounded bg-red-700 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+                        title={seg.imageFallbackReason}
+                      >
+                        Fallback
                       </span>
                     )}
                     {(seg as SegmentState).attempts != null && (seg as SegmentState).attempts! > 1 && !isRegen && (
@@ -1275,6 +1349,7 @@ export default function VideoDashboard({
           </button>
 
         </div>
+        {renderImageLightbox()}
       </main>
     );
   }

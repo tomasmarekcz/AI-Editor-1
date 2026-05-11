@@ -2,10 +2,10 @@ import path from 'path';
 import { generateImagePlans } from '@/lib/generateImagePlans';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
-import { generateWithImagen } from '@/lib/generateWithImagen';
+import { generateWithOpenAIImage, OPENAI_IMAGE_MODEL } from '@/lib/generateWithOpenAIImage';
 import { reviewImage } from '@/lib/reviewImage';
 import { rankGoogleImageCandidates } from '@/lib/selectGoogleImageCandidate';
-import { costGeminiText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
+import { costGeminiText, costOpenAIImage2Low, PRICING, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
 import { insertUsageEvents } from '@/lib/usage/record';
 import { requireAccountApi } from '@/lib/accounts';
 import { enforceCostGuardrails } from '@/lib/safetyGuardrails';
@@ -103,8 +103,13 @@ export async function POST(req: Request) {
           });
         } catch (err) {
           console.error('[images/plans]', err);
-          const fallbackMode: ImageGenMode = source === 'google' ? 'google' : 'imagen';
-          plans = segments.map((s) => ({ mode: fallbackMode, prompt: s.keywords }));
+          const fallbackMode: ImageGenMode = source === 'imagen' ? 'imagen' : 'google';
+          plans = segments.map((s) => ({
+            mode: fallbackMode,
+            prompt: fallbackMode === 'imagen'
+              ? `Photorealistic cinematic documentary still, ${s.text}, realistic environment, emotional atmosphere, dramatic composition, natural lighting, no text, no logos`
+              : s.keywords,
+          }));
         }
 
         send({ type: 'plans_ready', plans });
@@ -123,6 +128,7 @@ export async function POST(req: Request) {
             let localImagePath: string | undefined;
             let usedMode: ImageGenMode = plan.mode;
             let currentPrompt = plan.prompt;
+            let fallbackReason: string | undefined;
             let attempt = 0;
             let approved = false;
 
@@ -142,17 +148,20 @@ export async function POST(req: Request) {
                   usage.googleImageSelections += 1;
                   localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), seg.id);
                 } else {
-                  // Imagen 4 with automatic Google fallback
+                  // AI generation. In pure AI mode, keep the mode strict; hybrid may fall back.
                   try {
-                    localImagePath = await generateWithImagen(
+                    localImagePath = await generateWithOpenAIImage(
                       currentPrompt, seg.id, settings.orientation,
                     );
                     usage.imagenImages += 1;
-                  } catch (imagenErr) {
-                    const msg = imagenErr instanceof Error ? imagenErr.message : String(imagenErr);
-                    console.warn(`[images ${i}] Imagen failed (${msg}), falling back to Google`);
-                    // Use keywords for Google fallback — verbose Imagen prompts return nothing on Google
+                  } catch (aiImageErr) {
+                    if (source !== 'hybrid') throw aiImageErr;
+
+                    const msg = aiImageErr instanceof Error ? aiImageErr.message : String(aiImageErr);
+                    console.warn(`[images ${i}] AI image generation failed (${msg}), falling back to Google`);
+                    // Use keywords for Google fallback because verbose AI prompts return weak Google results.
                     const googleQuery = seg.keywords || seg.text.slice(0, 60);
+                    fallbackReason = 'AI generation failed; Google fallback was used.';
                     const candidates = await searchImageCandidateDetails(googleQuery, 10);
                     usage.serperQueries += 1;
                     const ranked = await rankGoogleImageCandidates(
@@ -213,6 +222,7 @@ export async function POST(req: Request) {
                 localImagePath,
                 imagePrompt: currentPrompt,
                 imageGenMode: usedMode,
+                imageFallbackReason: fallbackReason,
               };
               if (localImagePath && usedMode === 'imagen') usage.generatedImages += 1;
 
@@ -222,6 +232,7 @@ export async function POST(req: Request) {
                 imageUrl: localImagePath,
                 prompt: currentPrompt,
                 mode: usedMode,
+                fallbackReason,
                 attempts: attempt + 1,
               });
 
@@ -232,6 +243,7 @@ export async function POST(req: Request) {
                 ...updated[i],
                 imagePrompt: currentPrompt,
                 imageGenMode: usedMode,
+                imageFallbackReason: fallbackReason,
               };
               send({
                 type: 'image_failed',
@@ -268,11 +280,11 @@ export async function POST(req: Request) {
           }
           if (usage.imagenImages > 0) {
             costLines.push({
-              provider: 'google',
-              model: 'imagen-4.0-generate-001',
+              provider: 'openai',
+              model: OPENAI_IMAGE_MODEL,
               step: 'image_generation',
-              usage: { images: usage.imagenImages },
-              costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+              usage: openAIImage2Usage(usage.imagenImages, settings.orientation),
+              costUsd: costOpenAIImage2Low(usage.imagenImages, settings.orientation),
             });
           }
           if (usage.imageReviews > 0) {
@@ -318,6 +330,7 @@ export async function POST(req: Request) {
                   text: segment.text,
                   keywords: segment.keywords,
                   localImagePath: segment.localImagePath,
+                  fallbackReason: segment.imageFallbackReason,
                   generatedDuring: 'preview',
                 },
               });

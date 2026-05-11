@@ -12,12 +12,12 @@ import {
 } from '@/lib/storage/videoAssets';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
-import { generateWithImagen } from '@/lib/generateWithImagen';
+import { generateWithOpenAIImage, OPENAI_IMAGE_MODEL } from '@/lib/generateWithOpenAIImage';
 import { rankGoogleImageCandidates } from '@/lib/selectGoogleImageCandidate';
 import { enforceGenerationGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
-import { costGeminiText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
+import { costGeminiText, costOpenAIImage2Low, PRICING, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
 import type { SegmentData, VideoSettings, ImageGenMode } from '@/types';
 
 export const maxDuration = 300;
@@ -163,7 +163,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
             let mode: ImageGenMode = (seg.imageGenMode ?? settings.imageSource as ImageGenMode) === 'imagen' ? 'imagen' : 'google';
             try {
               if (mode === 'imagen') {
-                localImagePath = await generateWithImagen(seg.imagePrompt, fileId, settings.orientation ?? 'vertical');
+                localImagePath = await generateWithOpenAIImage(seg.imagePrompt, fileId, settings.orientation ?? 'vertical');
                 usage.imagenImages += 1;
               } else {
                 const candidates = await searchImageCandidateDetails(seg.imagePrompt, 10);
@@ -179,28 +179,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
               }
               usage.regeneratedImages += 1;
             } catch (err) {
-              if (mode === 'imagen') {
-                try {
-                  mode = 'google';
-                  const googleQuery = seg.keywords || seg.text.slice(0, 80);
-                  const candidates = await searchImageCandidateDetails(googleQuery, 10);
-                  usage.serperQueries += 1;
-                  const ranked = await rankGoogleImageCandidates(
-                    candidates,
-                    seg.text,
-                    fullScript,
-                    settings.orientation ?? 'vertical',
-                  );
-                  usage.googleImageSelections += 1;
-                  localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), fileId);
-                  usage.regeneratedImages += 1;
-                } catch {
-                  localImagePath = undefined;
-                }
-              } else {
-                console.warn('[rerender image]', err);
-                localImagePath = undefined;
-              }
+              console.warn('[rerender image]', err);
+              localImagePath = undefined;
             }
           }
 
@@ -304,11 +284,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         }
         if (usage.imagenImages > 0) {
           costLines.push({
-            provider: 'google',
-            model: 'imagen-4.0-generate-001',
+            provider: 'openai',
+            model: OPENAI_IMAGE_MODEL,
             step: 'image_generation',
-            usage: { images: usage.imagenImages },
-            costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+            usage: openAIImage2Usage(usage.imagenImages, settings.orientation ?? 'vertical'),
+            costUsd: costOpenAIImage2Low(usage.imagenImages, settings.orientation ?? 'vertical'),
           });
         }
         await insertUsageEvents({

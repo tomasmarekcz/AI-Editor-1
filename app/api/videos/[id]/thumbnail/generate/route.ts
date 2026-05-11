@@ -1,9 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireAccountApi } from '@/lib/accounts';
-import { generateImagenImage } from '@/lib/generateWithImagen';
+import { generateOpenAIImage, OPENAI_IMAGE_MODEL } from '@/lib/generateWithOpenAIImage';
 import { GEMINI_CAPTION_MODEL } from '@/lib/models';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
-import { costGeminiText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
+import { costGeminiText, costOpenAIImage2Low, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
 import type { Project, SavedVideo } from '@/lib/projects/types';
 import { enforceCostGuardrails } from '@/lib/safetyGuardrails';
 import {
@@ -200,7 +200,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
 Vertical 9:16 short-form video thumbnail, dramatic clickable composition, high contrast, crisp subject, strong lighting, expressive scene, one short bold readable text phrase inside the image, no logos, no watermark.`;
 
-    const image = await generateImagenImage(finalPrompt, 'vertical');
+    const image = await generateOpenAIImage(finalPrompt, 'vertical');
     const assetClient = createStorageAdminClient() ?? auth.supabase;
     const uploaded = await uploadBufferAsset({
       supabase: assetClient,
@@ -254,11 +254,11 @@ Vertical 9:16 short-form video thumbnail, dramatic clickable composition, high c
 
     const costLines: CostLine[] = [
       {
-        provider: 'google',
-        model: 'imagen-4.0-generate-001',
+        provider: 'openai',
+        model: OPENAI_IMAGE_MODEL,
         step: 'thumbnail_generation',
-        usage: { images: 1 },
-        costUsd: roundCost(PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+        usage: openAIImage2Usage(1, 'vertical'),
+        costUsd: costOpenAIImage2Low(1, 'vertical'),
       },
     ];
     if (!userPrompt) {

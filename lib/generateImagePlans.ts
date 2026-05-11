@@ -248,9 +248,9 @@ Return ONLY valid JSON:
     }));
   }
 
-  // ── Imagen: generate detailed AI image prompts ────────────────────────────
+  // ── AI generation: generate detailed image prompts ────────────────────────
   if (source === 'imagen') {
-    const system = `## # Image planning system — Imagen
+    const system = `## # Image planning system — AI Image Generation
 
 You are an elite cinematic visual director for viral short-form storytelling videos.
 
@@ -436,7 +436,7 @@ You are an elite visual storytelling director for viral short-form videos.
 For each segment, decide whether:
 - Google Images search
 OR
-- Imagen generation
+- AI image generation
 
 will create the highest-retention visual for that exact moment of the story.
 

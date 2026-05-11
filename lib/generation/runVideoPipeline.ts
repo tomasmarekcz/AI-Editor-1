@@ -5,7 +5,7 @@ import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
 import { rankGoogleImageCandidates } from '@/lib/selectGoogleImageCandidate';
 import { generateImagePlans, type ImagePlan } from '@/lib/generateImagePlans';
-import { generateWithImagen } from '@/lib/generateWithImagen';
+import { generateWithOpenAIImage, OPENAI_IMAGE_MODEL } from '@/lib/generateWithOpenAIImage';
 import { reviewImage } from '@/lib/reviewImage';
 import { enhanceScriptForAudio } from '@/lib/enhanceScriptForAudio';
 import { generateVoiceoverFull } from '@/lib/generateVoiceoverFull';
@@ -19,7 +19,7 @@ import {
   uploadLocalAsset,
   VIDEO_ASSETS_BUCKET,
 } from '@/lib/storage/videoAssets';
-import { costGeminiText, costOpenAIText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
+import { costGeminiText, costOpenAIImage2Low, costOpenAIText, PRICING, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { generateEffects } from '@/lib/generateEffects';
 import { logWorkerEvent } from '@/lib/worker/log';
@@ -166,7 +166,7 @@ export async function runVideoPipeline({
 
   const existingImageAssets = await supabase
     .from('video_assets')
-    .select('segment_index,segment_id,storage_path,prompt,source')
+    .select('segment_index,segment_id,storage_path,prompt,source,metadata')
     .eq('video_id', videoId)
     .eq('account_id', accountId)
     .in('kind', ['image', 'uploaded_image'])
@@ -194,6 +194,11 @@ export async function runVideoPipeline({
           imageUrl: localImagePath,
           imagePrompt: processed[index].imagePrompt ?? (asset.prompt ? String(asset.prompt) : undefined),
           imageGenMode: processed[index].imageGenMode ?? (asset.source === 'imagen' ? 'imagen' : asset.source === 'google' ? 'google' : undefined),
+          imageFallbackReason: processed[index].imageFallbackReason ?? ((
+            typeof asset.metadata === 'object' && asset.metadata && 'fallbackReason' in asset.metadata
+              ? String((asset.metadata as { fallbackReason?: unknown }).fallbackReason ?? '')
+              : undefined
+          ) || undefined),
         };
         usedIndexes.add(index);
         restoredImageIndexes.add(index);
@@ -272,10 +277,12 @@ export async function runVideoPipeline({
       });
     } catch (err) {
       await logPipeline('image_planning_failed', 'Image planning failed; using fallback prompts.', { err }, 'warn');
-      const fallbackMode: ImageGenMode = imageSource === 'google' ? 'google' : 'imagen';
+      const fallbackMode: ImageGenMode = imageSource === 'imagen' ? 'imagen' : 'google';
       plans = processed.map((segment) => ({
         mode: fallbackMode,
-        prompt: segment.keywords || segment.text.slice(0, 100),
+        prompt: fallbackMode === 'imagen'
+          ? `Photorealistic cinematic documentary still, ${segment.text}, realistic environment, emotional atmosphere, dramatic composition, natural lighting, no text, no logos`
+          : segment.keywords || segment.text.slice(0, 100),
       }));
     }
 
@@ -283,7 +290,14 @@ export async function runVideoPipeline({
       Promise.all(
         processed.map(async (seg, i) => {
           if (localImageExists(seg.localImagePath)) {
-            send({ type: 'image_ready', index: i, imageUrl: seg.localImagePath ?? '' });
+            send({
+              type: 'image_ready',
+              index: i,
+              imageUrl: seg.localImagePath ?? '',
+              prompt: seg.imagePrompt,
+              mode: seg.imageGenMode,
+              fallbackReason: seg.imageFallbackReason,
+            });
             await logPipeline('image_reused', `Image ${i} already ready; keeping existing asset.`, {
               index: i,
               localImagePath: seg.localImagePath,
@@ -293,12 +307,15 @@ export async function runVideoPipeline({
           }
 
           const plan = plans[i] ?? {
-            mode: imageSource === 'google' ? 'google' : 'imagen',
-            prompt: seg.keywords || seg.text.slice(0, 100),
+            mode: imageSource === 'imagen' ? 'imagen' : 'google',
+            prompt: imageSource === 'imagen'
+              ? `Photorealistic cinematic documentary still, ${seg.text}, realistic environment, emotional atmosphere, dramatic composition, natural lighting, no text, no logos`
+              : seg.keywords || seg.text.slice(0, 100),
           };
           let localImagePath: string | undefined;
           let usedMode: ImageGenMode = plan.mode;
           let currentPrompt = plan.prompt;
+          let fallbackReason: string | undefined;
           let approved = false;
           let attempt = 0;
 
@@ -317,15 +334,18 @@ export async function runVideoPipeline({
                 localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), seg.id);
               } else {
                 try {
-                  localImagePath = await generateWithImagen(currentPrompt, seg.id, settings.orientation);
+                  localImagePath = await generateWithOpenAIImage(currentPrompt, seg.id, settings.orientation);
                   usage.imagenImages += 1;
-                } catch (imagenErr) {
-                  await logPipeline('imagen_failed_google_fallback', `Imagen failed for segment ${i}; using Google fallback.`, {
+                } catch (aiImageErr) {
+                  if (imageSource !== 'hybrid') throw aiImageErr;
+
+                  await logPipeline('ai_image_failed_google_fallback', `AI image generation failed for segment ${i}; using Google fallback.`, {
                     index: i,
-                    imagenErr,
+                    aiImageErr,
                   }, 'warn');
                   usedMode = 'google';
                   currentPrompt = seg.keywords || seg.text.slice(0, 80);
+                  fallbackReason = 'AI generation failed; Google fallback was used.';
                   const candidates = await searchImageCandidateDetails(currentPrompt, 10);
                   usage.serperQueries += 1;
                   const ranked = await rankGoogleImageCandidates(
@@ -374,12 +394,14 @@ export async function runVideoPipeline({
               localImagePath,
               imagePrompt: currentPrompt,
               imageGenMode: usedMode,
+              imageFallbackReason: fallbackReason,
             };
             if (localImagePath) newlyCreatedImageIndexes.add(i);
-            send({ type: 'image_ready', index: i, imageUrl: localImagePath ?? '' });
+            send({ type: 'image_ready', index: i, imageUrl: localImagePath ?? '', prompt: currentPrompt, mode: usedMode, attempts: attempt + 1, fallbackReason });
             await logPipeline('image_ready', `Image ${i} ready.`, {
               index: i,
               mode: usedMode,
+              fallbackReason,
               hasLocalImagePath: !!localImagePath,
               attempts: attempt + 1,
             });
@@ -389,7 +411,9 @@ export async function runVideoPipeline({
               ...processed[i],
               imagePrompt: currentPrompt,
               imageGenMode: usedMode,
+              imageFallbackReason: fallbackReason,
             };
+            send({ type: 'image_failed', index: i, prompt: currentPrompt, mode: usedMode, error: err instanceof Error ? err.message : String(err) });
             await logPipeline('image_failed', `Image ${i} failed.`, { index: i, mode: usedMode, currentPrompt, err }, 'warn');
           }
         }),
@@ -684,6 +708,7 @@ export async function runVideoPipeline({
           text: seg.text,
           keywords: seg.keywords,
           localImagePath: seg.localImagePath,
+          fallbackReason: seg.imageFallbackReason,
         },
       });
       if (newlyCreatedImageIndexes.has(index) && seg.imageGenMode === 'imagen') {
@@ -717,11 +742,11 @@ export async function runVideoPipeline({
   }
   if (usage.imagenImages > 0) {
     actualCostLines.push({
-      provider: 'google',
-      model: 'imagen-4.0-generate-001',
+      provider: 'openai',
+      model: OPENAI_IMAGE_MODEL,
       step: 'image_generation',
-      usage: { images: usage.imagenImages },
-      costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+      usage: openAIImage2Usage(usage.imagenImages, settings.orientation),
+      costUsd: costOpenAIImage2Low(usage.imagenImages, settings.orientation),
     });
   }
   if (usage.imageReviews > 0) {

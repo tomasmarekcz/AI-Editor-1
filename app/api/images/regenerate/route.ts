@@ -1,13 +1,13 @@
 import path from 'path';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
 import { downloadImage } from '@/lib/downloadImage';
-import { generateWithImagen } from '@/lib/generateWithImagen';
+import { generateWithOpenAIImage, OPENAI_IMAGE_MODEL } from '@/lib/generateWithOpenAIImage';
 import { rankGoogleImageCandidates } from '@/lib/selectGoogleImageCandidate';
 import { requireAccountApi } from '@/lib/accounts';
 import { enforceCostGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
-import { costGeminiText, PRICING, roundCost, type CostLine } from '@/lib/pricing';
+import { costGeminiText, costOpenAIImage2Low, PRICING, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
 import {
   createStorageAdminClient,
   uploadLocalAsset,
@@ -62,26 +62,8 @@ export async function POST(req: Request) {
       usage.googleImageSelections += 1;
       localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), fileId);
     } else {
-      // Try Imagen, fall back to Google if unavailable
-      try {
-        localImagePath = await generateWithImagen(prompt, fileId, orientation ?? 'vertical');
-        usage.imagenImages += 1;
-      } catch (imagenErr) {
-        const msg = imagenErr instanceof Error ? imagenErr.message : String(imagenErr);
-        console.warn(`[regenerate] Imagen failed (${msg}), falling back to Google`);
-        const searchQuery = prompt.split(',')[0].slice(0, 80).trim();
-        const candidates = await searchImageCandidateDetails(searchQuery, 10);
-        usage.serperQueries += 1;
-        const ranked = await rankGoogleImageCandidates(
-          candidates,
-          prompt,
-          prompt,
-          orientation ?? 'vertical',
-        );
-        usage.googleImageSelections += 1;
-        localImagePath = await downloadImage(ranked.map((candidate) => candidate.imageUrl), fileId);
-        usedMode = 'google';
-      }
+      localImagePath = await generateWithOpenAIImage(prompt, fileId, orientation ?? 'vertical');
+      usage.imagenImages += 1;
     }
 
     if (projectId && videoId) {
@@ -151,11 +133,11 @@ export async function POST(req: Request) {
         }
         if (usage.imagenImages > 0) {
           costLines.push({
-            provider: 'google',
-            model: 'imagen-4.0-generate-001',
+            provider: 'openai',
+            model: OPENAI_IMAGE_MODEL,
             step: 'image_generation',
-            usage: { images: usage.imagenImages },
-            costUsd: roundCost(usage.imagenImages * PRICING.google['imagen-4.0-generate-001'].usdPerImage),
+            usage: openAIImage2Usage(usage.imagenImages, orientation ?? 'vertical'),
+            costUsd: costOpenAIImage2Low(usage.imagenImages, orientation ?? 'vertical'),
           });
         }
         await insertUsageEvents({
