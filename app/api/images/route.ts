@@ -17,7 +17,7 @@ import {
 } from '@/lib/storage/videoAssets';
 import type { SegmentData, VideoSettings, ImageSource, ImageGenMode } from '@/types';
 
-export const maxDuration = 180;
+export const maxDuration = 600;
 export const dynamic = 'force-dynamic';
 
 const MAX_REVIEW_ATTEMPTS = 3;
