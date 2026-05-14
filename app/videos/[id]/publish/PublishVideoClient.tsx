@@ -41,6 +41,8 @@ const SOUND_OPTIONS: { value: SoundChoice; label: string }[] = [
   { value: 'none', label: 'No added sound' },
 ];
 
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
+
 function defaultPlatformState(youtubeConnected: boolean): Record<PlatformId, PlatformState> {
   return {
     instagram: { enabled: false, sound: 'original', volume: 80 },
@@ -56,6 +58,63 @@ async function readApiError(res: Response) {
   } catch {
     return `HTTP ${res.status}`;
   }
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Could not prepare thumbnail image.'));
+    }, type, quality);
+  });
+}
+
+async function loadImage(file: File) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = url;
+    await image.decode();
+    return image;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function normalizeYouTubeThumbnail(file: File) {
+  const image = await loadImage(file);
+  let width = image.naturalWidth;
+  let height = image.naturalHeight;
+  const maxDimension = 1536;
+  const largestDimension = Math.max(width, height);
+  if (largestDimension > maxDimension) {
+    const scale = maxDimension / largestDimension;
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+  }
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not prepare thumbnail image.');
+
+  for (let scale = 1; scale >= 0.55; scale -= 0.15) {
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of [0.88, 0.78, 0.68, 0.58]) {
+      const blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+      if (blob.size <= YOUTUBE_THUMBNAIL_MAX_BYTES) {
+        const baseName = file.name.replace(/\.[^.]+$/, '') || 'thumbnail';
+        return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
+      }
+    }
+  }
+
+  throw new Error('Thumbnail is too large for YouTube. Try a smaller image.');
 }
 
 export function PublishVideoClient({
@@ -191,8 +250,9 @@ export function PublishVideoClient({
         throw new Error('Please upload an image file.');
       }
 
+      const normalizedFile = await normalizeYouTubeThumbnail(file);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', normalizedFile);
       const res = await fetch(`/api/videos/${videoId}/thumbnail/upload`, {
         method: 'POST',
         body: formData,
@@ -429,13 +489,13 @@ export function PublishVideoClient({
                     <input
                       ref={uploadInputRef}
                       type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      accept="image/*"
                       onChange={(event) => uploadThumbnail(event.target.files?.[0] ?? null)}
                       className="block w-full text-sm text-gray-300 file:mr-4 file:rounded-lg file:border-0 file:bg-cyan-400 file:px-4 file:py-2 file:text-sm file:font-black file:text-gray-950 hover:file:bg-cyan-300"
                       disabled={isUploadingThumbnail}
                     />
                     <p className="mt-3 text-xs text-gray-500">
-                      {isUploadingThumbnail ? 'Uploading...' : 'JPEG, PNG, WebP, or GIF.'}
+                      {isUploadingThumbnail ? 'Uploading...' : 'Images are converted to a YouTube-compatible JPEG under 2 MB.'}
                     </p>
                   </div>
                 )}

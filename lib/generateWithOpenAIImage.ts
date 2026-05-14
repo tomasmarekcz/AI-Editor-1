@@ -4,6 +4,8 @@ import type { Orientation } from '@/types';
 
 export const OPENAI_IMAGE_MODEL = 'gpt-image-2-2026-04-21';
 export const OPENAI_IMAGE_QUALITY = 'low';
+export const OPENAI_IMAGE_OUTPUT_FORMAT = 'jpeg';
+export const OPENAI_IMAGE_OUTPUT_COMPRESSION = 85;
 const DEFAULT_IMAGE_MIN_INTERVAL_MS = 15_000;
 const OPENAI_IMAGE_MAX_RETRIES = 8;
 
@@ -70,6 +72,8 @@ async function callOpenAIImageApi(prompt: string, size: string) {
         prompt,
         size,
         quality: OPENAI_IMAGE_QUALITY,
+        output_format: OPENAI_IMAGE_OUTPUT_FORMAT,
+        output_compression: OPENAI_IMAGE_OUTPUT_COMPRESSION,
         n: 1,
       }),
     });
@@ -100,13 +104,16 @@ export async function generateOpenAIImage(
     const res = await callOpenAIImageApi(prompt, size);
     const data = await res.json() as {
       data?: { b64_json?: string; url?: string }[];
+      output_format?: string;
     };
+    const outputFormat = data.output_format ?? OPENAI_IMAGE_OUTPUT_FORMAT;
+    const mimeType = outputFormat === 'jpeg' ? 'image/jpeg' : `image/${outputFormat}`;
 
     const image = data.data?.[0];
     if (image?.b64_json) {
       return {
         buffer: Buffer.from(image.b64_json, 'base64'),
-        mimeType: 'image/png',
+        mimeType,
         size,
         quality: OPENAI_IMAGE_QUALITY,
       };

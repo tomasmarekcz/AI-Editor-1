@@ -8,6 +8,8 @@ export const YOUTUBE_SCOPES = [
 ];
 
 export const YOUTUBE_ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
+const YOUTUBE_THUMBNAIL_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'application/octet-stream']);
 
 type OAuthState = {
   accountId: string;
@@ -34,6 +36,12 @@ type YouTubeChannelsResponse = {
       title?: string;
       customUrl?: string;
       thumbnails?: Record<string, { url?: string }>;
+    };
+    statistics?: {
+      subscriberCount?: string;
+      hiddenSubscriberCount?: boolean;
+      videoCount?: string;
+      viewCount?: string;
     };
   }[];
   error?: {
@@ -91,6 +99,14 @@ export type YouTubeDataApiVideoStats = {
   views: number;
   likes: number;
   comments: number;
+};
+
+export type YouTubeChannelStatistics = {
+  raw: YouTubeChannelsResponse;
+  subscriberCount: number | null;
+  hiddenSubscriberCount: boolean;
+  videoCount: number;
+  viewCount: number;
 };
 
 type YouTubeAnalyticsResponse = {
@@ -233,6 +249,31 @@ export async function fetchYouTubeChannel(accessToken: string) {
   };
 }
 
+export async function fetchYouTubeChannelStatistics(accessToken: string): Promise<YouTubeChannelStatistics> {
+  const url = new URL('https://www.googleapis.com/youtube/v3/channels');
+  url.searchParams.set('part', 'statistics');
+  url.searchParams.set('mine', 'true');
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json() as YouTubeChannelsResponse;
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message ?? `YouTube channel statistics lookup failed with HTTP ${res.status}.`);
+  }
+
+  const stats = data.items?.[0]?.statistics;
+  if (!stats) throw new Error('No YouTube channel statistics were found for this Google account.');
+
+  return {
+    raw: data,
+    subscriberCount: stats.hiddenSubscriberCount ? null : nullableNumberFromUnknown(stats.subscriberCount),
+    hiddenSubscriberCount: Boolean(stats.hiddenSubscriberCount),
+    videoCount: numberFromUnknown(stats.videoCount),
+    viewCount: numberFromUnknown(stats.viewCount),
+  };
+}
+
 export function encryptedTokenRows(tokens: GoogleTokenResponse) {
   return {
     encrypted_refresh_token: encryptSecret(tokens.refresh_token ?? ''),
@@ -357,6 +398,13 @@ export async function uploadThumbnailToYouTube({
   image: Blob;
   mimeType: string;
 }) {
+  if (image.size > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+    throw new Error(`YouTube thumbnail is too large (${image.size} bytes). Maximum size is 2 MB.`);
+  }
+  if (!YOUTUBE_THUMBNAIL_MIME_TYPES.has(mimeType)) {
+    throw new Error(`YouTube thumbnail MIME type is not supported: ${mimeType}. Use JPEG or PNG.`);
+  }
+
   const url = new URL('https://www.googleapis.com/upload/youtube/v3/thumbnails/set');
   url.searchParams.set('uploadType', 'media');
   url.searchParams.set('videoId', videoId);

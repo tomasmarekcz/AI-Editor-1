@@ -17,6 +17,8 @@ import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
+
 type GenerateThumbnailRequest = {
   prompt?: string;
 };
@@ -201,14 +203,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 Vertical 9:16 short-form video thumbnail, dramatic clickable composition, high contrast, crisp subject, strong lighting, expressive scene, one short bold readable text phrase inside the image, no logos, no watermark.`;
 
     const image = await generateOpenAIImage(finalPrompt, 'vertical');
+    if (image.buffer.byteLength > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+      throw new Error('Generated thumbnail is larger than YouTube allows. Try a simpler prompt or upload a compressed JPEG.');
+    }
     const assetClient = createStorageAdminClient() ?? auth.supabase;
+    const extension = image.mimeType === 'image/jpeg' ? 'jpg' : 'png';
     const uploaded = await uploadBufferAsset({
       supabase: assetClient,
       userId: auth.user.id,
       projectId: video.project_id,
       videoId: video.id,
       folder: 'thumbnail',
-      filename: `thumbnail-${Date.now()}.png`,
+      filename: `thumbnail-${Date.now()}.${extension}`,
       buffer: image.buffer,
       contentType: image.mimeType,
     });

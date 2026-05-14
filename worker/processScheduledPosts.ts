@@ -62,6 +62,7 @@ async function markPostPublished(
   supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   post: ScheduledPostJob,
   result: { id: string; url: string },
+  thumbnailError?: string,
 ) {
   await supabase
     .from('scheduled_posts')
@@ -71,8 +72,8 @@ async function markPostPublished(
       published_at: new Date().toISOString(),
       platform_post_id: result.id,
       platform_post_url: result.url,
-      error_message: null,
-      error_details: {},
+      error_message: thumbnailError ? `Video published, but thumbnail upload failed: ${thumbnailError}` : null,
+      error_details: thumbnailError ? { thumbnail: { status: 'failed', message: thumbnailError } } : {},
       updated_at: new Date().toISOString(),
     })
     .eq('id', post.id);
@@ -172,6 +173,7 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
       privacyStatus: post.privacy_status,
     });
 
+    let thumbnailError: string | undefined;
     if (post.thumbnail_storage_path) {
       try {
         const thumbnailBlob = await downloadStorageBlob(supabase, post.thumbnail_storage_path);
@@ -181,7 +183,18 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
           image: thumbnailBlob,
           mimeType: mimeTypeFromBlob(thumbnailBlob, 'image/jpeg'),
         });
+        await logWorkerEvent({
+          supabase,
+          videoId: post.video_id,
+          accountId: post.account_id,
+          projectId: post.project_id,
+          source: 'youtube-publish',
+          event: 'thumbnail_uploaded',
+          message: 'YouTube thumbnail uploaded.',
+          metadata: { postId: post.id, youtubeVideoId: upload.id, thumbnailStoragePath: post.thumbnail_storage_path },
+        });
       } catch (thumbnailErr) {
+        thumbnailError = thumbnailErr instanceof Error ? thumbnailErr.message : String(thumbnailErr);
         await logWorkerEvent({
           supabase,
           videoId: post.video_id,
@@ -190,13 +203,13 @@ export async function processNextScheduledPost(): Promise<ProcessScheduledPostRe
           source: 'youtube-publish',
           event: 'thumbnail_failed',
           level: 'warn',
-          message: thumbnailErr instanceof Error ? thumbnailErr.message : String(thumbnailErr),
-          metadata: { postId: post.id, youtubeVideoId: upload.id },
+          message: thumbnailError,
+          metadata: { postId: post.id, youtubeVideoId: upload.id, thumbnailStoragePath: post.thumbnail_storage_path },
         });
       }
     }
 
-    await markPostPublished(supabase, post, upload);
+    await markPostPublished(supabase, post, upload, thumbnailError);
     await logWorkerEvent({
       supabase,
       videoId: post.video_id,

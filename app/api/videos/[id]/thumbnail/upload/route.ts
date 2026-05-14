@@ -13,9 +13,8 @@ export const maxDuration = 30;
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/png',
-  'image/webp',
-  'image/gif',
 ]);
+const YOUTUBE_THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024;
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -28,7 +27,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return Response.json({ error: 'Image file is required' }, { status: 400 });
     }
     if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-      return Response.json({ error: 'Only JPEG, PNG, WebP, or GIF images are allowed' }, { status: 400 });
+      return Response.json({ error: 'Only YouTube-compatible JPEG or PNG thumbnails are allowed.' }, { status: 400 });
+    }
+    if (file.size > YOUTUBE_THUMBNAIL_MAX_BYTES) {
+      return Response.json({ error: 'YouTube thumbnails must be 2 MB or smaller.' }, { status: 400 });
     }
 
     const { data: video } = await auth.supabase
@@ -50,7 +52,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       projectId: video.project_id,
       videoId: video.id,
       folder: 'thumbnail',
-      filename: `thumbnail-${Date.now()}.png`,
+      filename: `thumbnail-${Date.now()}.${file.type === 'image/jpeg' ? 'jpg' : 'png'}`,
       buffer,
       contentType: file.type,
     });
