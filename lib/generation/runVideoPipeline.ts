@@ -155,6 +155,66 @@ export async function runVideoPipeline({
   ));
   const newlyCreatedImageIndexes = new Set<number>();
   const restoredImageIndexes = new Set<number>();
+  const savedImageIndexes = new Set<number>();
+  const usage: Record<string, number> = {
+    generatedImages: 0,
+    regeneratedImages: 0,
+    imageReviews: 0,
+    serperQueries: 0,
+    googleImageSelections: 0,
+    imagenImages: 0,
+  };
+
+  const saveImageCheckpoint = async (index: number, seg: SegmentData) => {
+    if (restoredImageIndexes.has(index) || savedImageIndexes.has(index)) return;
+    if (!seg.localImagePath || !localImageExists(seg.localImagePath)) return;
+
+    try {
+      const imageAsset = await uploadLocalAsset({
+        supabase,
+        userId,
+        projectId,
+        videoId,
+        folder: 'images',
+        localPath: seg.localImagePath,
+        filename: `${String(index + 1).padStart(2, '0')}-${path.basename(seg.localImagePath)}`,
+      });
+      await requireDbWrite('Image asset checkpoint DB upsert failed', supabase.from('video_assets').upsert({
+        user_id: userId,
+        account_id: accountId,
+        project_id: projectId,
+        video_id: videoId,
+        kind: seg.localImagePath.includes('-upload.') ? 'uploaded_image' : 'image',
+        segment_id: seg.id,
+        segment_index: index,
+        storage_bucket: VIDEO_ASSETS_BUCKET,
+        storage_path: imageAsset.storagePath,
+        mime_type: imageAsset.mimeType,
+        size_bytes: imageAsset.sizeBytes,
+        prompt: seg.imagePrompt ?? null,
+        source: seg.imageGenMode ?? settings.imageSource,
+        metadata: {
+          text: seg.text,
+          keywords: seg.keywords,
+          localImagePath: seg.localImagePath,
+          fallbackReason: seg.imageFallbackReason,
+          checkpoint: 'image_ready',
+        },
+      }, { onConflict: 'video_id,kind,storage_path' }));
+      savedImageIndexes.add(index);
+      if (newlyCreatedImageIndexes.has(index) && seg.imageGenMode === 'imagen') {
+        usage.generatedImages += 1;
+      }
+      await logPipeline('image_checkpoint_saved', `Image ${index} saved to storage checkpoint.`, {
+        index,
+        storagePath: imageAsset.storagePath,
+        source: seg.imageGenMode ?? settings.imageSource,
+      });
+    } catch (assetErr) {
+      console.warn(`[asset image checkpoint ${index}]`, assetErr);
+      await logPipeline('asset_image_checkpoint_failed', `Image ${index} checkpoint upload failed.`, { index, assetErr }, 'warn');
+    }
+  };
 
   const existingImageAssets = await supabase
     .from('video_assets')
@@ -230,15 +290,6 @@ export async function runVideoPipeline({
   } catch (err) {
     await logPipeline('project_visual_style_lookup_failed', 'Could not load project visual style for image planning.', { err }, 'warn');
   }
-
-  const usage: Record<string, number> = {
-    generatedImages: 0,
-    regeneratedImages: 0,
-    imageReviews: 0,
-    serperQueries: 0,
-    googleImageSelections: 0,
-    imagenImages: 0,
-  };
 
   const parallelTasks: Promise<void>[] = [];
   const imagesAlreadyReady = processed.every((segment) => localImageExists(segment.localImagePath));
@@ -397,6 +448,7 @@ export async function runVideoPipeline({
               hasLocalImagePath: !!localImagePath,
               attempts: attempt + 1,
             });
+            await saveImageCheckpoint(i, processed[i]);
           } catch (err) {
             console.error(`[img ${i}]`, err);
             processed[i] = {
@@ -421,6 +473,24 @@ export async function runVideoPipeline({
   }
 
   await Promise.all(parallelTasks);
+  await Promise.all(processed.map((seg, index) => saveImageCheckpoint(index, seg)));
+  if (savedImageIndexes.size > 0 || restoredImageIndexes.size > 0) {
+    await requireDbWrite('Image checkpoint video update failed', supabase
+      .from('videos')
+      .update({
+        current_step: 'images_saved',
+        segments: processed,
+        usage,
+        generated_images_count: usage.generatedImages,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', videoId));
+    await logPipeline('images_saved', 'Image checkpoints are saved.', {
+      savedImages: savedImageIndexes.size,
+      restoredImages: restoredImageIndexes.size,
+      totalSegments: processed.length,
+    });
+  }
   const effects = await effectsPromise;
   if (effects.length > 0) {
     await logPipeline('effects_ready', 'Effects generated.', { effects });
@@ -439,7 +509,7 @@ export async function runVideoPipeline({
 
   await supabase
     .from('videos')
-    .update({ current_step: 'audio_enhancement', updated_at: new Date().toISOString() })
+    .update({ current_step: 'audio_enhancement', segments: processed, updated_at: new Date().toISOString() })
     .eq('id', videoId);
   send({ type: 'step', step: 'enhance', message: 'Upravuji scénář pro zvuk...' });
 
@@ -536,6 +606,14 @@ export async function runVideoPipeline({
       elevenLabsCustomVoiceId: settings.elevenLabsCustomVoiceId ? '[set]' : '',
     },
   }));
+  await requireDbWrite('Audio checkpoint video update failed', supabase
+    .from('videos')
+    .update({
+      current_step: 'audio_saved',
+      tts_duration_seconds: audioDurationSeconds,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', videoId));
   const ttsText = processed.map((s) => s.audioText ?? s.text).join('\n\n');
   const ttsMinutes = Math.max(1 / 60, audioDurationSeconds / 60);
   if (settings.ttsProvider === 'gemini') {
@@ -622,6 +700,15 @@ export async function runVideoPipeline({
     size_bytes: subtitlesAsset.sizeBytes,
     metadata: { format: 'segments-json' },
   }));
+  await requireDbWrite('Subtitles checkpoint video update failed', supabase
+    .from('videos')
+    .update({
+      current_step: 'subtitles_saved',
+      segments: processed,
+      transcription_duration_seconds: audioDurationSeconds,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', videoId));
 
   await supabase
     .from('videos')
@@ -661,56 +748,6 @@ export async function runVideoPipeline({
     .update({ status: 'uploading', current_step: 'uploading', updated_at: new Date().toISOString() })
     .eq('id', videoId);
 
-  const imageAssetRows = [];
-  for (const [index, seg] of processed.entries()) {
-    if (!seg.localImagePath) continue;
-    if (restoredImageIndexes.has(index)) continue;
-    if (!localImageExists(seg.localImagePath)) {
-      await logPipeline('asset_image_missing', `Image asset ${index} local file is missing; skipping asset upload.`, {
-        index,
-        localImagePath: seg.localImagePath,
-      }, 'warn');
-      continue;
-    }
-    try {
-      const imageAsset = await uploadLocalAsset({
-        supabase,
-        userId,
-        projectId,
-        videoId,
-        folder: 'images',
-        localPath: seg.localImagePath,
-        filename: `${String(index + 1).padStart(2, '0')}-${path.basename(seg.localImagePath)}`,
-      });
-      imageAssetRows.push({
-        user_id: userId,
-        account_id: accountId,
-        project_id: projectId,
-        video_id: videoId,
-        kind: seg.localImagePath.includes('-upload.') ? 'uploaded_image' : 'image',
-        segment_id: seg.id,
-        segment_index: index,
-        storage_bucket: VIDEO_ASSETS_BUCKET,
-        storage_path: imageAsset.storagePath,
-        mime_type: imageAsset.mimeType,
-        size_bytes: imageAsset.sizeBytes,
-        prompt: seg.imagePrompt ?? null,
-        source: seg.imageGenMode ?? settings.imageSource,
-        metadata: {
-          text: seg.text,
-          keywords: seg.keywords,
-          localImagePath: seg.localImagePath,
-          fallbackReason: seg.imageFallbackReason,
-        },
-      });
-      if (newlyCreatedImageIndexes.has(index) && seg.imageGenMode === 'imagen') {
-        usage.generatedImages += 1;
-      }
-    } catch (assetErr) {
-      console.warn(`[asset image ${index}]`, assetErr);
-      await logPipeline('asset_image_failed', `Image asset ${index} upload failed.`, { index, assetErr }, 'warn');
-    }
-  }
   if (usage.serperQueries > 0) {
     actualCostLines.push({
       provider: 'serper',
@@ -754,10 +791,6 @@ export async function runVideoPipeline({
       costUsd: costGeminiText(usage.imageReviews * 450, usage.imageReviews * 50),
     });
   }
-  if (imageAssetRows.length > 0) {
-    await requireDbWrite('Image assets DB insert failed', supabase.from('video_assets').insert(imageAssetRows));
-  }
-
   let thumbnailPath: string | null = null;
   const firstImage = processed.find((seg) => localImageExists(seg.localImagePath))?.localImagePath;
   if (firstImage) {
@@ -817,6 +850,17 @@ export async function runVideoPipeline({
     size_bytes: finalAsset.sizeBytes,
     metadata: { localVideoUrl: videoUrl },
   }));
+  await requireDbWrite('Final upload checkpoint video update failed', supabase
+    .from('videos')
+    .update({
+      current_step: 'final_uploaded',
+      final_video_path: finalAsset.storagePath,
+      final_video_mime_type: finalAsset.mimeType,
+      final_video_size_bytes: finalAsset.sizeBytes,
+      thumbnail_path: thumbnailPath,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', videoId));
 
   const finalSignedUrl = await createSignedUrl(supabase, finalAsset.storagePath);
   const durationSeconds = processed.reduce((sum, seg) => sum + (seg.audioDuration ?? seg.duration ?? 0), 0);

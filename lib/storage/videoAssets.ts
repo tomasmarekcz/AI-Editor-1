@@ -1,8 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -203,6 +206,55 @@ async function createR2SignedUrl(storagePath: string, expiresIn: number) {
   );
 }
 
+async function listR2Prefix(storagePrefix: string) {
+  const r2 = getR2Client();
+  if (!r2) return [];
+
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const result = await r2.client.send(new ListObjectsV2Command({
+      Bucket: r2.config.bucket,
+      Prefix: storagePrefix.endsWith('/') ? storagePrefix : `${storagePrefix}/`,
+      ContinuationToken: continuationToken,
+    }));
+    for (const item of result.Contents ?? []) {
+      if (item.Key) keys.push(item.Key);
+    }
+    continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return keys;
+}
+
+async function deleteR2Assets(storagePaths: string[]) {
+  const r2 = getR2Client();
+  if (!r2 || storagePaths.length === 0) return;
+
+  for (let i = 0; i < storagePaths.length; i += 1000) {
+    const batch = storagePaths.slice(i, i + 1000);
+    if (batch.length === 1) {
+      try {
+        await r2.client.send(new DeleteObjectCommand({
+          Bucket: r2.config.bucket,
+          Key: batch[0],
+        }));
+      } catch (err) {
+        if (!isNotFound(err)) console.warn(`[storage:r2] delete ${batch[0]} failed`, err);
+      }
+      continue;
+    }
+
+    await r2.client.send(new DeleteObjectsCommand({
+      Bucket: r2.config.bucket,
+      Delete: {
+        Objects: batch.map((Key) => ({ Key })),
+        Quiet: true,
+      },
+    }));
+  }
+}
+
 async function ensureVideoBucketLimit(requiredBytes: number) {
   if (useR2Primary()) return;
   const admin = createStorageAdminClient();
@@ -379,4 +431,81 @@ export async function downloadAssetBlob(supabase: SupabaseClient, storagePath: s
   if (!admin) return null;
   const fallback = await admin.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
   return fallback.data ?? null;
+}
+
+async function listSupabasePrefix(
+  supabase: SupabaseClient,
+  prefix: string,
+): Promise<string[]> {
+  const normalized = prefix.replace(/^\/+|\/+$/g, '');
+  const { data, error } = await supabase.storage.from(VIDEO_ASSETS_BUCKET).list(normalized, {
+    limit: 1000,
+    sortBy: { column: 'name', order: 'asc' },
+  });
+  if (error) {
+    const { status, statusCode } = storageStatus(error);
+    if (status === 404 || statusCode === 404) return [];
+    console.warn(`[storage] list ${normalized} failed`, error);
+    return [];
+  }
+
+  const paths: string[] = [];
+  for (const item of data ?? []) {
+    const name = String(item.name ?? '');
+    if (!name) continue;
+    const itemPath = `${normalized}/${name}`;
+    const maybeFile = item as { id?: string | null; metadata?: unknown };
+    if (maybeFile.id || maybeFile.metadata) {
+      paths.push(itemPath);
+    } else {
+      paths.push(...await listSupabasePrefix(supabase, itemPath));
+    }
+  }
+  return paths;
+}
+
+async function deleteSupabaseAssets(supabase: SupabaseClient, storagePaths: string[]) {
+  const uniquePaths = [...new Set(storagePaths.filter(Boolean))];
+  for (let i = 0; i < uniquePaths.length; i += 100) {
+    const batch = uniquePaths.slice(i, i + 100);
+    const { error } = await supabase.storage.from(VIDEO_ASSETS_BUCKET).remove(batch);
+    if (error) {
+      const { status, statusCode } = storageStatus(error);
+      if (status !== 404 && statusCode !== 404) {
+        console.warn(`[storage] remove batch failed`, error);
+      }
+    }
+  }
+}
+
+export async function deleteVideoStorageAssets({
+  supabase,
+  userId,
+  projectId,
+  videoId,
+  storagePaths = [],
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  projectId: string;
+  videoId: string;
+  storagePaths?: string[];
+}) {
+  const prefix = storageBasePath(userId, projectId, videoId);
+  const paths = new Set(storagePaths.filter(Boolean));
+
+  if (useR2Primary()) {
+    for (const key of await listR2Prefix(prefix)) paths.add(key);
+    await deleteR2Assets([...paths]);
+    if (!useSupabaseFallback()) return { deletedPaths: paths.size, prefix };
+  }
+
+  const admin = createStorageAdminClient();
+  const supabaseClient = admin ?? supabase;
+  for (const pathFromList of await listSupabasePrefix(supabaseClient, prefix)) {
+    paths.add(pathFromList);
+  }
+  await deleteSupabaseAssets(supabaseClient, [...paths]);
+
+  return { deletedPaths: paths.size, prefix };
 }

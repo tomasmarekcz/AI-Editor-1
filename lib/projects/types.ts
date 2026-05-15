@@ -37,9 +37,13 @@ export type VideoStatus =
   | 'generating'
   | 'processing_images'
   | 'generating_images'
+  | 'images_saved'
   | 'generating_voice'
+  | 'audio_saved'
   | 'transcribing'
+  | 'subtitles_saved'
   | 'rendering'
+  | 'final_uploaded'
   | 'uploading'
   | 'done'
   | 'failed';

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { DeleteVideoButton } from './DeleteVideoButton';
 import type { VideoListItem } from './page';
 import type { Project } from '@/lib/projects/types';
 
@@ -394,6 +395,11 @@ function VideoCard({ video }: { video: VideoListItem }) {
               {isRetrying ? 'Spouštím...' : video.status === 'queued' ? 'Trigger worker' : video.status === 'done' ? 'Render again' : 'Try again'}
             </button>
           )}
+          <DeleteVideoButton
+            videoId={video.id}
+            label="Smazat"
+            className="min-w-[72px] flex-1 rounded-lg border border-red-800 bg-red-500/10 py-1.5 text-center text-[11px] font-bold text-red-200 transition hover:border-red-500 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          />
         </div>
       </div>
     </article>

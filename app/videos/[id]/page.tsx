@@ -6,6 +6,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSignedUrl } from '@/lib/storage/videoAssets';
 import { formatUsd } from '@/lib/pricing';
 import { VideoRetryButton } from './VideoRetryButton';
+import { DeleteVideoButton } from '../DeleteVideoButton';
 import { YouTubeAnalyticsCard, type PublishedYouTubePostView, type YouTubeAnalyticsView } from './YouTubeAnalyticsCard';
 import type { Project, SavedVideo, VideoAsset } from '@/lib/projects/types';
 
@@ -137,6 +138,11 @@ export default async function VideoDetailPage({ params }: { params: { id: string
             >
               Všechna videa
             </Link>
+            <DeleteVideoButton
+              videoId={video.id}
+              redirectTo={`/videos?project=${video.project_id}`}
+              label="Smazat video"
+            />
             <Link
               href={`/dashboard?project=${video.project_id}`}
               className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-bold text-gray-300 transition hover:border-cyan-400 hover:text-cyan-200"

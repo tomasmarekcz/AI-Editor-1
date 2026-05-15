@@ -315,6 +315,24 @@ export async function processClaimedJob(
 export async function processVideoJob(videoId: string) {
   const claimed = await claimVideoJob(videoId);
   if (!claimed) {
+    const supabase = createSupabaseAdminClient();
+    const snapshot = supabase ? await fetchVideoSnapshot(supabase, videoId) : null;
+    const status = snapshot && 'status' in snapshot ? snapshot.status : null;
+    if (status && status !== 'queued') {
+      const reason = `Video is already ${String(status)}; direct worker trigger skipped.`;
+      if (supabase) {
+        await logWorkerEvent({
+          supabase,
+          videoId,
+          source: 'worker-process',
+          event: 'already_claimed_or_finished',
+          level: 'info',
+          message: reason,
+          metadata: { snapshot },
+        });
+      }
+      return { ok: true, videoId, processed: false, reason } satisfies ProcessJobResult;
+    }
     const reason = 'Worker could not claim this video. Check video status, claim_video_job RPC, and worker Supabase env.';
     await markJobNotClaimed(videoId, reason);
     return { ok: false, videoId, error: reason } satisfies ProcessJobResult;
