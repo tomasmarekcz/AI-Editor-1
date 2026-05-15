@@ -6,7 +6,7 @@ import {
   uploadThumbnailToYouTube,
   uploadVideoToYouTube,
 } from '@/lib/integrations/youtube';
-import { VIDEO_ASSETS_BUCKET } from '@/lib/storage/videoAssets';
+import { downloadAssetBlob } from '@/lib/storage/videoAssets';
 import { logWorkerEvent } from '@/lib/worker/log';
 
 type ProcessScheduledPostResult =
@@ -83,10 +83,8 @@ async function downloadStorageBlob(
   supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   storagePath: string,
 ) {
-  const { data, error } = await supabase.storage
-    .from(VIDEO_ASSETS_BUCKET)
-    .download(storagePath);
-  if (error || !data) throw new Error(error?.message ?? `Storage asset not found: ${storagePath}`);
+  const data = await downloadAssetBlob(supabase, storagePath);
+  if (!data) throw new Error(`Storage asset not found: ${storagePath}`);
   return data;
 }
 

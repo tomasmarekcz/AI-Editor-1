@@ -14,7 +14,7 @@ import { mapSTTToSegments } from '@/lib/mapSTTToSegments';
 import { renderVideo } from '@/lib/renderVideo';
 import {
   createSignedUrl,
-  createStorageAdminClient,
+  downloadAssetBlob,
   uploadBufferAsset,
   uploadLocalAsset,
   VIDEO_ASSETS_BUCKET,
@@ -61,16 +61,8 @@ async function downloadStorageImageToTmp(
   videoId: string,
   index: number,
 ) {
-  const primary = await supabase.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
-  let blob = primary.data;
-
-  if (primary.error || !blob) {
-    const admin = createStorageAdminClient();
-    if (!admin) throw primary.error ?? new Error(`Could not download ${storagePath}`);
-    const fallback = await admin.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
-    if (fallback.error || !fallback.data) throw fallback.error ?? new Error(`Could not download ${storagePath}`);
-    blob = fallback.data;
-  }
+  const blob = await downloadAssetBlob(supabase, storagePath);
+  if (!blob) throw new Error(`Could not download ${storagePath}`);
 
   const ext = path.extname(storagePath).toLowerCase() || '.jpg';
   const dir = path.join(process.cwd(), 'public', 'tmp', 'images');

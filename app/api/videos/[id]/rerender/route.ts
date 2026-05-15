@@ -7,7 +7,7 @@ import { renderVideo } from '@/lib/renderVideo';
 import {
   uploadLocalAsset,
   createSignedUrl,
-  createStorageAdminClient,
+  downloadAssetBlob,
   VIDEO_ASSETS_BUCKET,
 } from '@/lib/storage/videoAssets';
 import { searchImageCandidateDetails } from '@/lib/searchImages';
@@ -24,13 +24,7 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 async function downloadVideoAsset(supabase: SupabaseClient, storagePath: string) {
-  const primary = await supabase.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
-  if (!primary.error && primary.data) return primary.data;
-
-  const admin = createStorageAdminClient();
-  if (!admin) return null;
-  const fallback = await admin.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
-  return fallback.data ?? null;
+  return downloadAssetBlob(supabase, storagePath);
 }
 
 const publicLocalPathToAbsolute = (localPath: string): string => {

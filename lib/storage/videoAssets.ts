@@ -1,9 +1,16 @@
 import fs from 'fs';
 import path from 'path';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
-export const VIDEO_ASSETS_BUCKET = 'video-assets';
+export const VIDEO_ASSETS_BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? 'video-assets';
 const DEFAULT_VIDEO_BUCKET_LIMIT_BYTES = 300 * 1024 * 1024;
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -39,7 +46,16 @@ function sleep(ms: number) {
 function storageStatus(err: unknown) {
   const status = typeof err === 'object' && err && 'status' in err ? Number((err as { status?: number }).status) : 0;
   const statusCode = typeof err === 'object' && err && 'statusCode' in err ? Number((err as { statusCode?: string | number }).statusCode) : 0;
-  return { status, statusCode };
+  const httpStatusCode = typeof err === 'object' && err && '$metadata' in err
+    ? Number((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? 0)
+    : 0;
+  return { status, statusCode, httpStatusCode };
+}
+
+function isNotFound(err: unknown) {
+  const { status, statusCode, httpStatusCode } = storageStatus(err);
+  const name = typeof err === 'object' && err && 'name' in err ? String((err as { name?: string }).name) : '';
+  return status === 404 || statusCode === 404 || httpStatusCode === 404 || name === 'NotFound' || name === 'NoSuchKey';
 }
 
 async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 4): Promise<T> {
@@ -64,7 +80,131 @@ export function createStorageAdminClient() {
   return createSupabaseAdminClient();
 }
 
+type R2Config = {
+  bucket: string;
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+let r2Client: S3Client | null = null;
+
+function storageProvider() {
+  return (process.env.STORAGE_PROVIDER ?? 'supabase').toLowerCase();
+}
+
+function fallbackProvider() {
+  return (process.env.STORAGE_FALLBACK_PROVIDER ?? '').toLowerCase();
+}
+
+function getR2Config(): R2Config | null {
+  const bucket = process.env.R2_BUCKET;
+  const endpoint = process.env.R2_ENDPOINT;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!bucket || !endpoint || !accessKeyId || !secretAccessKey) return null;
+  return {
+    bucket,
+    endpoint,
+    region: process.env.R2_REGION ?? 'auto',
+    accessKeyId,
+    secretAccessKey,
+  };
+}
+
+function getR2Client() {
+  const config = getR2Config();
+  if (!config) return null;
+  if (!r2Client) {
+    r2Client = new S3Client({
+      region: config.region,
+      endpoint: config.endpoint,
+      credentials: {
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      },
+      forcePathStyle: true,
+    });
+  }
+  return { client: r2Client, config };
+}
+
+function useR2Primary() {
+  return storageProvider() === 'r2' && !!getR2Config();
+}
+
+function useSupabaseFallback() {
+  return fallbackProvider() === 'supabase' || storageProvider() !== 'r2';
+}
+
+async function r2AssetExists(storagePath: string) {
+  const r2 = getR2Client();
+  if (!r2) return false;
+  try {
+    await r2.client.send(new HeadObjectCommand({
+      Bucket: r2.config.bucket,
+      Key: storagePath,
+    }));
+    return true;
+  } catch (err) {
+    if (!isNotFound(err)) {
+      console.warn(`[storage:r2] head ${storagePath} failed`, err);
+    }
+    return false;
+  }
+}
+
+async function uploadBufferAssetToR2(storagePath: string, buffer: Buffer, contentType: string) {
+  const r2 = getR2Client();
+  if (!r2) throw new Error('R2 storage is selected, but R2 env is incomplete.');
+  await r2.client.send(new PutObjectCommand({
+    Bucket: r2.config.bucket,
+    Key: storagePath,
+    Body: buffer,
+    ContentType: contentType,
+  }));
+}
+
+async function downloadR2AssetBlob(storagePath: string) {
+  const r2 = getR2Client();
+  if (!r2) return null;
+  try {
+    const result = await r2.client.send(new GetObjectCommand({
+      Bucket: r2.config.bucket,
+      Key: storagePath,
+    }));
+    const body = result.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+    if (!body?.transformToByteArray) return null;
+    const bytes = await body.transformToByteArray();
+    return new Blob([Buffer.from(bytes)], {
+      type: result.ContentType ?? mimeFromPath(storagePath),
+    });
+  } catch (err) {
+    if (!isNotFound(err)) {
+      console.warn(`[storage:r2] download ${storagePath} failed`, err);
+    }
+    return null;
+  }
+}
+
+async function createR2SignedUrl(storagePath: string, expiresIn: number) {
+  const r2 = getR2Client();
+  if (!r2) return null;
+  const exists = await r2AssetExists(storagePath);
+  if (!exists) return null;
+  return getSignedUrl(
+    r2.client,
+    new GetObjectCommand({
+      Bucket: r2.config.bucket,
+      Key: storagePath,
+    }),
+    { expiresIn },
+  );
+}
+
 async function ensureVideoBucketLimit(requiredBytes: number) {
+  if (useR2Primary()) return;
   const admin = createStorageAdminClient();
   if (!admin) {
     console.warn('[storage] SUPABASE_SERVICE_ROLE_KEY missing; cannot auto-update bucket file size limit.');
@@ -113,21 +253,28 @@ export async function uploadBufferAsset({
   contentType: string;
 }) {
   const storagePath = `${storageBasePath(userId, projectId, videoId)}/${folder}/${filename}`;
-  const { error } = await withRetry(
-    async () => {
-      const result = await supabase.storage
-        .from(VIDEO_ASSETS_BUCKET)
-        .upload(storagePath, buffer, {
-          contentType,
-          upsert: true,
-        });
-      if (result.error) throw result.error;
-      return result;
-    },
-    `upload ${storagePath}`,
-  );
+  if (useR2Primary()) {
+    await withRetry(
+      () => uploadBufferAssetToR2(storagePath, buffer, contentType),
+      `r2 upload ${storagePath}`,
+    );
+  } else {
+    const { error } = await withRetry(
+      async () => {
+        const result = await supabase.storage
+          .from(VIDEO_ASSETS_BUCKET)
+          .upload(storagePath, buffer, {
+            contentType,
+            upsert: true,
+          });
+        if (result.error) throw result.error;
+        return result;
+      },
+      `supabase upload ${storagePath}`,
+    );
+    if (error) throw error;
+  }
 
-  if (error) throw error;
   return { storagePath, sizeBytes: buffer.byteLength, mimeType: contentType };
 }
 
@@ -172,8 +319,19 @@ export async function uploadLocalAsset({
   return { ...uploaded, sizeBytes: stat.size, mimeType };
 }
 
-export async function createSignedUrl(supabase: SupabaseClient, storagePath: string | null, expiresIn = 3600) {
+export async function createSignedUrl(
+  supabase: SupabaseClient,
+  storagePath: string | null,
+  expiresIn = Number(process.env.R2_SIGNED_URL_EXPIRES_SECONDS ?? 3600) || 3600,
+) {
   if (!storagePath) return null;
+
+  if (useR2Primary()) {
+    const signedUrl = await createR2SignedUrl(storagePath, expiresIn);
+    if (signedUrl) return signedUrl;
+    if (!useSupabaseFallback()) return null;
+  }
+
   const admin = createStorageAdminClient();
 
   if (admin) {
@@ -203,4 +361,22 @@ export async function createSignedUrl(supabase: SupabaseClient, storagePath: str
   } catch {
     return null;
   }
+}
+
+export async function downloadAssetBlob(supabase: SupabaseClient, storagePath: string | null) {
+  if (!storagePath) return null;
+
+  if (useR2Primary()) {
+    const r2Blob = await downloadR2AssetBlob(storagePath);
+    if (r2Blob) return r2Blob;
+    if (!useSupabaseFallback()) return null;
+  }
+
+  const primary = await supabase.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
+  if (!primary.error && primary.data) return primary.data;
+
+  const admin = createStorageAdminClient();
+  if (!admin) return null;
+  const fallback = await admin.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
+  return fallback.data ?? null;
 }

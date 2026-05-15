@@ -1,6 +1,5 @@
 import { requireAccountApi } from '@/lib/accounts';
-import { VIDEO_ASSETS_BUCKET } from '@/lib/storage/videoAssets';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { downloadAssetBlob } from '@/lib/storage/videoAssets';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,13 +33,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     if (videoError) return Response.json({ error: videoError.message }, { status: 500 });
     if (!video?.final_video_path) return Response.json({ error: 'Final MP4 is not available.' }, { status: 404 });
 
-    const storage = createSupabaseAdminClient() ?? auth.supabase;
-    const { data, error } = await storage.storage
-      .from(VIDEO_ASSETS_BUCKET)
-      .download(video.final_video_path);
+    const data = await downloadAssetBlob(auth.supabase, video.final_video_path);
 
-    if (error || !data) {
-      return Response.json({ error: error?.message ?? 'Video file not found.' }, { status: 404 });
+    if (!data) {
+      return Response.json({ error: 'Video file not found.' }, { status: 404 });
     }
 
     return new Response(data, {
