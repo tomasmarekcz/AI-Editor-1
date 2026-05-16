@@ -54,6 +54,7 @@ export async function POST(req: Request) {
       project_id: projectId,
       title,
       status: 'generating',
+      current_step: 'script_saved',
       original_script: script,
       settings,
       estimated_cost_usd: estimate.totalUsd,

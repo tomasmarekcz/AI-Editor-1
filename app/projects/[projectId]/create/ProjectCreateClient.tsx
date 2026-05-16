@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { estimateScriptGenerationCost, formatUsd, type CostLine } from '@/lib/pricing';
+import { mergeVideoSettings } from '@/lib/projects/defaults';
 import type { Project, ProjectCreateVideoItem } from '@/lib/projects/types';
 
 type GenerateScriptResponse = {
@@ -16,10 +17,6 @@ type BrainstormResponse = {
   topics?: string[];
   error?: string;
 };
-
-function prefillKey(projectId: string) {
-  return `videoScriptPrefill:${projectId}`;
-}
 
 function formatDuration(sec: number | null): string {
   if (!sec) return '-';
@@ -75,12 +72,33 @@ export function ProjectCreateClient({
     project.default_visual_prompt,
   ]);
 
-  function openDashboardWithScript(nextScript: string, scriptGenerationCostLines: CostLine[] = []) {
-    window.sessionStorage.setItem(prefillKey(project.id), JSON.stringify({
-      script: nextScript,
-      scriptGenerationCostLines,
-    }));
-    router.push(`/dashboard?project=${project.id}&prefill=1`);
+  async function openDashboardWithScript(nextScript: string, scriptGenerationCostLines: CostLine[] = []) {
+    const cleanScript = nextScript.trim();
+    if (!cleanScript) return;
+    setIsGenerating(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/videos/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: project.id,
+          script: cleanScript,
+          settings: mergeVideoSettings(project.default_settings),
+          scriptGenerationCostLines,
+        }),
+      });
+      const data = await res.json() as { videoId?: string; error?: string };
+      if (!res.ok || data.error || !data.videoId) {
+        throw new Error(data.error ?? await readApiError(res));
+      }
+      router.push(`/dashboard?project=${project.id}&resumeVideo=${data.videoId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   async function generateFromPrompt(promptOverride?: string) {
@@ -103,7 +121,7 @@ export function ProjectCreateClient({
         throw new Error(data.error ?? await readApiError(res));
       }
 
-      openDashboardWithScript(data.script, data.costLine ? [data.costLine] : [scriptEstimate]);
+      await openDashboardWithScript(data.script, data.costLine ? [data.costLine] : [scriptEstimate]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -220,11 +238,11 @@ export function ProjectCreateClient({
             )}
 
             <button
-              onClick={() => openDashboardWithScript(script)}
-              disabled={!script.trim()}
+              onClick={() => void openDashboardWithScript(script)}
+              disabled={!script.trim() || isGenerating}
               className="mt-5 rounded-lg bg-cyan-400 px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-gray-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-gray-800 disabled:text-gray-600"
             >
-              Generate Video From Script
+              {isGenerating ? 'Opening...' : 'Generate Video From Script'}
             </button>
           </article>
 
@@ -374,6 +392,14 @@ export function ProjectCreateClient({
                             Edit
                           </Link>
                         </>
+                      )}
+                      {video.status !== 'done' && (
+                        <Link
+                          href={`/dashboard?project=${project.id}&resumeVideo=${video.id}`}
+                          className="min-w-[76px] flex-1 rounded-lg border border-amber-700 bg-amber-500/10 px-3 py-2 text-center text-xs font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20"
+                        >
+                          Navázat
+                        </Link>
                       )}
                     </div>
                   </div>

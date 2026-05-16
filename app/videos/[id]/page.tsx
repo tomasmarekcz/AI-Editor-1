@@ -108,6 +108,14 @@ export default async function VideoDetailPage({ params }: { params: { id: string
           </div>
           <div className="flex flex-wrap gap-2">
             <VideoRetryButton videoId={video.id} status={video.status} />
+            {video.status !== 'done' && (
+              <Link
+                href={`/dashboard?project=${video.project_id}&resumeVideo=${video.id}`}
+                className="rounded-lg border border-amber-700 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20 hover:text-white"
+              >
+                Navázat
+              </Link>
+            )}
             {video.status === 'done' && (
               <>
                 {finalUrl && (

@@ -12,6 +12,7 @@ export type VideoListItem = {
   id: string;
   title: string;
   status: string;
+  current_step: string | null;
   created_at: string;
   completed_at: string | null;
   render_progress: number;
@@ -39,7 +40,7 @@ export default async function VideosPage({
     supabase
       .from('videos')
       .select(`
-        id, title, status, created_at, completed_at,
+        id, title, status, current_step, created_at, completed_at,
         render_progress, duration_seconds, final_video_path,
         thumbnail_path, error_message,
         estimated_cost_usd, actual_cost_usd, project_id

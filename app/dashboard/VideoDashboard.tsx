@@ -94,6 +94,18 @@ const DEFAULT_SETTINGS: VideoSettings = DEFAULT_VIDEO_SETTINGS;
 type AppStep = 'idle' | 'segmenting' | 'generating-images' | 'awaiting-review' | 'awaiting-uploads' | 'queued' | 'rendering' | 'done' | 'error';
 interface SegmentState extends SegmentData { uploadPreviewUrl?: string; uploading?: boolean; imageError?: string; reviewing?: boolean; attempts?: number }
 type ImageLightboxState = { src: string; label: string; fallbackReason?: string } | null;
+export type DashboardResumeVideo = {
+  id: string;
+  title: string;
+  status: string;
+  currentStep: string | null;
+  originalScript: string;
+  settings: unknown;
+  segments: unknown[];
+  renderProgress: number;
+  errorMessage: string | null;
+  imageUrlsByIndex: Record<number, string>;
+};
 
 // ── Small helpers ──────────────────────────────────────────────────────────
 function Toggle({ active, onClick, children }: {
@@ -131,11 +143,13 @@ export default function VideoDashboard({
   projectId,
   projectName,
   initialSettings,
+  resumeVideo,
   shouldSaveFirstVideoDefaults = false,
 }: {
   projectId: string;
   projectName: string;
   initialSettings?: Partial<VideoSettings> | null;
+  resumeVideo?: DashboardResumeVideo | null;
   shouldSaveFirstVideoDefaults?: boolean;
 }) {
   const [script, setScript]       = useState('');
@@ -170,6 +184,7 @@ export default function VideoDashboard({
   const isBusy = step === 'segmenting' || step === 'queued' || step === 'rendering' || step === 'generating-images';
 
   useEffect(() => {
+    if (resumeVideo) return;
     const raw = window.sessionStorage.getItem(`videoScriptPrefill:${projectId}`);
     if (!raw) return;
 
@@ -189,7 +204,45 @@ export default function VideoDashboard({
     } finally {
       window.sessionStorage.removeItem(`videoScriptPrefill:${projectId}`);
     }
-  }, [projectId]);
+  }, [projectId, resumeVideo]);
+
+  useEffect(() => {
+    if (!resumeVideo) return;
+
+    const resumedSettings = mergeVideoSettings(resumeVideo.settings as Partial<VideoSettings> | null | undefined);
+    const resumedSegments = (Array.isArray(resumeVideo.segments) ? resumeVideo.segments : [])
+      .map((segment, index) => ({
+        ...(segment as SegmentData),
+        uploadPreviewUrl: resumeVideo.imageUrlsByIndex[index],
+        reviewing: false,
+      }));
+    const hasSegments = resumedSegments.length > 0;
+    const hasImages = resumedSegments.some((segment) => segment.localImagePath || segment.uploadPreviewUrl);
+
+    setActiveVideoId(resumeVideo.id);
+    setSavedVideoId(resumeVideo.id);
+    setScript(resumeVideo.originalScript);
+    setSettings(resumedSettings);
+    setSegments(resumedSegments);
+    setRenderPct(resumeVideo.renderProgress);
+    setCostEstimate(null);
+    setError(resumeVideo.errorMessage ?? '');
+    setEditingPrompts({});
+    setRegeneratingIds(new Set());
+
+    if (hasSegments && hasImages) {
+      setStep('awaiting-review');
+      setStatusMsg('Navázáno na uložené obrázky. Zkontrolujte je a pokračujte renderem.');
+    } else if (hasSegments && resumedSettings.imageSource === 'upload') {
+      setStep('awaiting-uploads');
+      setStatusMsg(`Navázáno na ${resumedSegments.length} segmentů. Nahrajte chybějící obrázky.`);
+    } else {
+      setStep('idle');
+      setStatusMsg(hasSegments
+        ? 'Navázáno na uložený scénář a segmenty. Pokračujte přípravou obrázků.'
+        : 'Navázáno na uložený scénář. Zkontrolujte nastavení a pokračujte.');
+    }
+  }, [resumeVideo]);
 
   const saveProjectDefaults = useCallback(async (showMessage = true) => {
     setSettingsSaveMsg(showMessage ? 'Ukládám nastavení projektu...' : '');
@@ -220,6 +273,7 @@ export default function VideoDashboard({
           projectId,
           videoId,
           script,
+          settings,
           chunkSize: settings.subtitle.chunkSize,
           segmentDuration: settings.segmentDuration,
         }),
@@ -251,6 +305,12 @@ export default function VideoDashboard({
     setIsStartingVideo(true);
     setError('');
     try {
+      if (activeVideoId) {
+        setCostEstimate(null);
+        await beginGeneration(activeVideoId);
+        return;
+      }
+
       const res = await fetch('/api/videos/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -269,7 +329,7 @@ export default function VideoDashboard({
     } finally {
       setIsStartingVideo(false);
     }
-  }, [beginGeneration, costEstimate, isBusy, projectId, script, settings, scriptGenerationCostLines]);
+  }, [activeVideoId, beginGeneration, costEstimate, isBusy, projectId, script, settings, scriptGenerationCostLines]);
 
   // ── Image generation (SSE) ────────────────────────────────────────────────
   const startImageGeneration = useCallback(async (segs: SegmentData[], videoId = activeVideoId) => {
@@ -279,6 +339,12 @@ export default function VideoDashboard({
     setRegeneratingIds(new Set());
 
     try {
+      setSegments(segs.map((seg) => (
+        seg.localImagePath || (seg as SegmentState).uploadPreviewUrl
+          ? seg
+          : { ...seg, reviewing: true }
+      )));
+
       const res = await fetch('/api/images', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -446,7 +512,7 @@ export default function VideoDashboard({
   }, [activeVideoId, hasSavedFirstVideoDefaults, projectId, saveProjectDefaults, script, settings, scriptGenerationCostLines]);
 
   const handleReset = () => {
-    setStep('idle'); setSegments([]); setVideoUrl(''); setSavedVideoId(''); setActiveVideoId(''); setCostEstimate(null); setError(''); setRenderPct(0);
+    setStep('idle'); setSegments([]); setVideoUrl(''); setSavedVideoId(''); setActiveVideoId(''); setCostEstimate(null); setError(''); setRenderPct(0); setStatusMsg('');
     setEditingPrompts({}); setRegeneratingIds(new Set());
   };
 
@@ -980,7 +1046,9 @@ export default function VideoDashboard({
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               {statusMsg}
             </span>
-          : settings.imageSource === 'upload'
+          : activeVideoId && segments.length > 0 && settings.imageSource !== 'upload'
+            ? 'Pokračovat k obrázkům →'
+            : settings.imageSource === 'upload'
             ? 'Segmentovat scénář →'
             : 'Připravit obrázky →'
         }
@@ -1159,6 +1227,7 @@ export default function VideoDashboard({
   // ── Review step ────────────────────────────────────────────────────────────
   if (step === 'awaiting-review') {
     const anyRegenerating = regeneratingIds.size > 0;
+    const allImagesReady = segments.every((segment) => segment.localImagePath || segment.uploadPreviewUrl);
     return (
       <main className="min-h-screen bg-gray-950 py-10 px-4">
         <div className="max-w-5xl mx-auto space-y-5">
@@ -1177,10 +1246,10 @@ export default function VideoDashboard({
               </button>
               <button
                 onClick={() => startRender(segments)}
-                disabled={anyRegenerating}
+                disabled={anyRegenerating || !allImagesReady}
                 className="py-2 px-5 rounded-lg font-semibold text-sm bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors"
               >
-                {anyRegenerating ? 'Čekám na regeneraci...' : 'Odsouhlasit a renderovat →'}
+                {anyRegenerating ? 'Čekám na regeneraci...' : allImagesReady ? 'Odsouhlasit a renderovat →' : 'Doplňte chybějící obrázky'}
               </button>
             </div>
           </div>
@@ -1342,10 +1411,10 @@ export default function VideoDashboard({
           {/* Bottom approve button */}
           <button
             onClick={() => startRender(segments)}
-            disabled={anyRegenerating}
+            disabled={anyRegenerating || !allImagesReady}
             className="w-full py-4 rounded-xl font-semibold text-base bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors"
           >
-            {anyRegenerating ? 'Čekám na dokončení regenerace...' : 'Odsouhlasit a renderovat video →'}
+            {anyRegenerating ? 'Čekám na dokončení regenerace...' : allImagesReady ? 'Odsouhlasit a renderovat video →' : 'Doplňte chybějící obrázky'}
           </button>
 
         </div>
@@ -1482,6 +1551,11 @@ export default function VideoDashboard({
             <p className="text-[11px] uppercase tracking-widest text-gray-500">Selected project</p>
             <h2 className="mt-1 text-lg font-bold text-white">{projectName}</h2>
             {settingsSaveMsg && <p className="mt-1 text-xs text-cyan-300">{settingsSaveMsg}</p>}
+            {activeVideoId && (
+              <p className="mt-1 text-xs font-semibold text-amber-200">
+                Navázáno na rozpracované video: {activeVideoId.slice(0, 8)}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
@@ -1595,7 +1669,7 @@ export default function VideoDashboard({
                 disabled={isStartingVideo}
                 className="flex-1 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-black uppercase tracking-[0.16em] text-gray-950 transition hover:bg-cyan-300 disabled:opacity-60"
               >
-                {isStartingVideo ? 'Starting...' : 'Generate Video'}
+                {isStartingVideo ? 'Starting...' : activeVideoId ? 'Continue Video' : 'Generate Video'}
               </button>
             </div>
           </div>

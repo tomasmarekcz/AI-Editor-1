@@ -23,6 +23,7 @@ type VideoRow = {
   account_id: string;
   project_id: string;
   status: string;
+  current_step: string | null;
 };
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
@@ -34,7 +35,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
 
   const { data: video, error: videoError } = await db
     .from('videos')
-    .select('id,user_id,account_id,project_id,status')
+    .select('id,user_id,account_id,project_id,status,current_step')
     .eq('id', params.id)
     .eq('account_id', account.id)
     .maybeSingle<VideoRow>();
@@ -45,7 +46,8 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   if (!video) {
     return Response.json({ error: 'Video not found' }, { status: 404 });
   }
-  if (ACTIVE_STATUSES.has(video.status)) {
+  const isResumeCheckpoint = ['script_saved', 'script_segmented', 'images_saved', 'audio_saved', 'subtitles_saved', 'final_uploaded'].includes(video.current_step ?? '');
+  if (ACTIVE_STATUSES.has(video.status) && !isResumeCheckpoint) {
     return Response.json({
       error: 'Video is currently being processed. Wait until it finishes or fails before deleting it.',
     }, { status: 409 });

@@ -4,13 +4,15 @@ import { insertUsageEvents } from '@/lib/usage/record';
 import { requireAccountApi } from '@/lib/accounts';
 import { enforceCostGuardrails } from '@/lib/safetyGuardrails';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
+import type { VideoSettings } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    const { script, chunkSize, segmentDuration, projectId, videoId } = (await req.json()) as {
+    const { script, settings, chunkSize, segmentDuration, projectId, videoId } = (await req.json()) as {
       script: string;
+      settings?: VideoSettings;
       chunkSize?: number;
       segmentDuration?: 'auto' | number;
       projectId?: string;
@@ -58,7 +60,14 @@ export async function POST(req: Request) {
         });
         await supabase
           .from('videos')
-          .update({ segments, status: 'processing_images' })
+          .update({
+            original_script: script,
+            settings: settings ?? undefined,
+            segments,
+            status: 'processing_images',
+            current_step: 'script_segmented',
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', videoId)
           .eq('account_id', account.id);
       } else {

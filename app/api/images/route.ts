@@ -346,9 +346,12 @@ export async function POST(req: Request) {
           await supabase
             .from('videos')
             .update({
+              status: 'processing_images',
+              current_step: 'images_saved',
               segments: updated,
               generated_images_count: usage.generatedImages,
               serper_queries_count: usage.serperQueries,
+              updated_at: new Date().toISOString(),
             })
             .eq('id', videoId)
             .eq('account_id', account.id);

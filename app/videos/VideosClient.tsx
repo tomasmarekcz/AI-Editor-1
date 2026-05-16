@@ -16,11 +16,17 @@ const STATUS_LABEL: Record<string, string> = {
   done: 'Hotovo',
   failed: 'Chyba',
   generating: 'Generuji',
+  script_saved: 'Scénář uložený',
+  script_segmented: 'Scény uložené',
   processing_images: 'Obrázky',
   generating_images: 'Obrázky',
+  images_saved: 'Obrázky uložené',
   generating_voice: 'Voiceover',
+  audio_saved: 'Audio uložené',
   transcribing: 'Titulky',
+  subtitles_saved: 'Titulky uložené',
   rendering: 'Renderuji',
+  final_uploaded: 'Video uložené',
   uploading: 'Nahrávám',
 };
 
@@ -30,11 +36,17 @@ const STATUS_COLOR: Record<string, string> = {
   done: 'bg-emerald-500/15 text-emerald-300',
   failed: 'bg-red-500/15 text-red-300',
   generating: 'bg-cyan-500/15 text-cyan-300',
+  script_saved: 'bg-cyan-500/15 text-cyan-300',
+  script_segmented: 'bg-cyan-500/15 text-cyan-300',
   processing_images: 'bg-cyan-500/15 text-cyan-300',
   generating_images: 'bg-cyan-500/15 text-cyan-300',
+  images_saved: 'bg-cyan-500/15 text-cyan-300',
   generating_voice: 'bg-cyan-500/15 text-cyan-300',
+  audio_saved: 'bg-cyan-500/15 text-cyan-300',
   transcribing: 'bg-cyan-500/15 text-cyan-300',
+  subtitles_saved: 'bg-cyan-500/15 text-cyan-300',
   rendering: 'bg-cyan-500/15 text-cyan-300',
+  final_uploaded: 'bg-cyan-500/15 text-cyan-300',
   uploading: 'bg-cyan-500/15 text-cyan-300',
 };
 
@@ -261,9 +273,11 @@ function VideoCard({ video }: { video: VideoListItem }) {
   const router = useRouter();
   const [isRetrying, setIsRetrying] = useState(false);
   const canRetry = video.status === 'failed' || video.status === 'queued' || video.status === 'done';
+  const canResume = video.status !== 'done';
   const detailHref = `/videos/${video.id}`;
   const isInProgress = video.status !== 'done' && video.status !== 'failed';
   const progressPct = Math.max(0, Math.min(100, Math.round(video.render_progress ?? 0)));
+  const displayStatus = video.current_step || video.status;
 
   async function retryRender() {
     setIsRetrying(true);
@@ -307,8 +321,8 @@ function VideoCard({ video }: { video: VideoListItem }) {
         )}
         {/* Status badge */}
         <div className="absolute top-2 right-3 flex items-center gap-1.5">
-          <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_COLOR[video.status] ?? 'bg-gray-800 text-gray-400'}`}>
-            {STATUS_LABEL[video.status] ?? video.status}
+          <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_COLOR[displayStatus] ?? STATUS_COLOR[video.status] ?? 'bg-gray-800 text-gray-400'}`}>
+            {STATUS_LABEL[displayStatus] ?? STATUS_LABEL[video.status] ?? displayStatus}
           </span>
           {isInProgress && (
             <span className="rounded bg-gray-950/80 px-2 py-0.5 text-[10px] font-black text-cyan-200 ring-1 ring-cyan-500/30">
@@ -381,6 +395,15 @@ function VideoCard({ video }: { video: VideoListItem }) {
                 ✏️ Edit
               </Link>
             </>
+          )}
+          {canResume && (
+            <Link
+              href={`/dashboard?project=${video.project_id}&resumeVideo=${video.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-[88px] flex-1 rounded-lg border border-amber-700 bg-amber-500/10 py-1.5 text-center text-[11px] font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20"
+            >
+              Navázat
+            </Link>
           )}
           {canRetry && (
             <button
