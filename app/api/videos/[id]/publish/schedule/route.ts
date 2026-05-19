@@ -4,6 +4,7 @@ import type { SavedVideo } from '@/lib/projects/types';
 export const dynamic = 'force-dynamic';
 
 type ScheduleRequest = {
+  scheduledPostId?: string;
   caption?: string;
   title?: string;
   scheduledFor?: string;
@@ -51,6 +52,52 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const title = body.title?.trim() || video.title || 'Untitled video';
     const caption = body.caption?.trim() ?? '';
 
+    const row = {
+      caption,
+      title,
+      description: caption,
+      privacy_status: body.privacyStatus ?? 'public',
+      scheduled_for: scheduledFor.toISOString(),
+      timezone: body.timezone ?? null,
+      video_storage_path: videoPath,
+      thumbnail_storage_path: body.thumbnailStoragePath || video.thumbnail_path || null,
+      error_message: null,
+      error_details: {},
+      updated_at: new Date().toISOString(),
+    };
+
+    if (body.scheduledPostId) {
+      const { data: scheduledPost, error } = await auth.supabase
+        .from('scheduled_posts')
+        .update(row)
+        .eq('id', body.scheduledPostId)
+        .eq('video_id', video.id)
+        .eq('account_id', auth.account.id)
+        .eq('platform', 'youtube')
+        .eq('status', 'scheduled')
+        .select('id,status,scheduled_for,platform,caption,title,description,privacy_status,timezone,thumbnail_storage_path,platform_post_url,error_message')
+        .maybeSingle<{
+          id: string;
+          status: string;
+          scheduled_for: string;
+          platform: string;
+          caption: string | null;
+          title: string | null;
+          description: string | null;
+          privacy_status: string;
+          timezone: string | null;
+          thumbnail_storage_path: string | null;
+          platform_post_url: string | null;
+          error_message: string | null;
+        }>();
+
+      if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!scheduledPost) {
+        return Response.json({ error: 'Scheduled post was not found or can no longer be edited.' }, { status: 404 });
+      }
+      return Response.json({ scheduledPost });
+    }
+
     const { data: scheduledPost, error } = await auth.supabase
       .from('scheduled_posts')
       .insert({
@@ -61,17 +108,23 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         created_by: auth.user.id,
         platform: 'youtube',
         status: 'scheduled',
-        caption,
-        title,
-        description: caption,
-        privacy_status: body.privacyStatus ?? 'public',
-        scheduled_for: scheduledFor.toISOString(),
-        timezone: body.timezone ?? null,
-        video_storage_path: videoPath,
-        thumbnail_storage_path: body.thumbnailStoragePath || video.thumbnail_path || null,
+        ...row,
       })
-      .select('id,status,scheduled_for,platform')
-      .single<{ id: string; status: string; scheduled_for: string; platform: string }>();
+      .select('id,status,scheduled_for,platform,caption,title,description,privacy_status,timezone,thumbnail_storage_path,platform_post_url,error_message')
+      .single<{
+        id: string;
+        status: string;
+        scheduled_for: string;
+        platform: string;
+        caption: string | null;
+        title: string | null;
+        description: string | null;
+        privacy_status: string;
+        timezone: string | null;
+        thumbnail_storage_path: string | null;
+        platform_post_url: string | null;
+        error_message: string | null;
+      }>();
 
     if (error) return Response.json({ error: error.message }, { status: 500 });
     return Response.json({ scheduledPost });

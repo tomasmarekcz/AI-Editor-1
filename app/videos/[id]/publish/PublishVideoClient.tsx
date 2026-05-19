@@ -24,7 +24,13 @@ type ScheduledPostView = {
   id: string;
   platform: string;
   status: string;
+  caption: string | null;
+  title: string | null;
+  description: string | null;
+  privacy_status: string;
   scheduled_for: string;
+  timezone: string | null;
+  thumbnail_storage_path: string | null;
   platform_post_url: string | null;
   error_message: string | null;
 };
@@ -58,6 +64,17 @@ async function readApiError(res: Response) {
   } catch {
     return `HTTP ${res.status}`;
   }
+}
+
+function localDateTimeParts(value?: string | null) {
+  if (!value) return { date: '', time: '' };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: '', time: '' };
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return {
+    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+  };
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
@@ -143,27 +160,30 @@ export function PublishVideoClient({
   initialScheduledPosts: ScheduledPostView[];
 }) {
   const youtubeConnected = youtubeConnection?.status === 'connected';
-  const [caption, setCaption] = useState('');
+  const editableScheduledPost = initialScheduledPosts.find((post) => post.platform === 'youtube' && post.status === 'scheduled') ?? null;
+  const initialScheduledAt = localDateTimeParts(editableScheduledPost?.scheduled_for);
+  const [caption, setCaption] = useState(editableScheduledPost?.caption ?? editableScheduledPost?.description ?? '');
   const [hasGeneratedCaption, setHasGeneratedCaption] = useState(false);
   const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
   const [captionError, setCaptionError] = useState('');
   const [thumbnailMode, setThumbnailMode] = useState<ThumbnailMode>(initialThumbnailSource === 'ai' ? 'ai' : initialThumbnailSource === 'uploaded' ? 'upload' : 'default');
   const [thumbnailUrl, setThumbnailUrl] = useState(initialThumbnailUrl);
-  const [thumbnailPath, setThumbnailPath] = useState(initialThumbnailPath);
+  const [thumbnailPath, setThumbnailPath] = useState(editableScheduledPost?.thumbnail_storage_path ?? initialThumbnailPath);
   const [thumbnailPrompt, setThumbnailPrompt] = useState(initialThumbnailPrompt);
   const [thumbnailSource, setThumbnailSource] = useState<ThumbnailSource>(initialThumbnailSource);
   const [isGeneratingThumbnail, setIsGeneratingThumbnail] = useState(false);
   const [isUploadingThumbnail, setIsUploadingThumbnail] = useState(false);
   const [thumbnailError, setThumbnailError] = useState('');
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const [automaticPublishing, setAutomaticPublishing] = useState(false);
+  const [automaticPublishing, setAutomaticPublishing] = useState(Boolean(editableScheduledPost));
   const [platforms, setPlatforms] = useState<Record<PlatformId, PlatformState>>(() => defaultPlatformState(youtubeConnected));
-  const [publishDate, setPublishDate] = useState('');
-  const [publishTime, setPublishTime] = useState('');
+  const [publishDate, setPublishDate] = useState(initialScheduledAt.date);
+  const [publishTime, setPublishTime] = useState(initialScheduledAt.time);
   const [draftMessage, setDraftMessage] = useState('');
   const [scheduleError, setScheduleError] = useState('');
   const [isScheduling, setIsScheduling] = useState(false);
   const [scheduledPosts, setScheduledPosts] = useState(initialScheduledPosts);
+  const [editingScheduledPostId, setEditingScheduledPostId] = useState(editableScheduledPost?.id ?? '');
 
   const timezone = useMemo(() => {
     try {
@@ -317,14 +337,20 @@ export function PublishVideoClient({
           timezone,
           thumbnailStoragePath: thumbnailPath,
           privacyStatus: 'public',
+          scheduledPostId: editingScheduledPostId || undefined,
         }),
       });
       const data = await res.json() as { scheduledPost?: ScheduledPostView; error?: string };
       if (!res.ok || data.error || !data.scheduledPost) {
         throw new Error(data.error ?? await readApiError(res));
       }
-      setScheduledPosts((current) => [data.scheduledPost as ScheduledPostView, ...current].slice(0, 5));
-      setDraftMessage('YouTube Shorts publishing has been scheduled.');
+      const nextPost = data.scheduledPost as ScheduledPostView;
+      setEditingScheduledPostId(nextPost.id);
+      setScheduledPosts((current) => {
+        const withoutUpdated = current.filter((post) => post.id !== nextPost.id);
+        return [nextPost, ...withoutUpdated].slice(0, 5);
+      });
+      setDraftMessage(editingScheduledPostId ? 'YouTube Shorts publishing has been rescheduled.' : 'YouTube Shorts publishing has been scheduled.');
     } catch (err) {
       setScheduleError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -340,7 +366,7 @@ export function PublishVideoClient({
             Publishing
           </p>
           <h1 className="mt-2 text-3xl font-black tracking-normal text-white">
-            Schedule Publishing
+            {editingScheduledPostId ? 'Reschedule Publishing' : 'Schedule Publishing'}
           </h1>
           <p className="mt-2 text-sm leading-6 text-gray-400">
             {videoTitle} · {projectName}{projectNiche ? ` · ${projectNiche}` : ''}
@@ -649,7 +675,7 @@ export function PublishVideoClient({
                 disabled={isScheduling || !canSchedule}
                 className="flex-1 rounded-lg bg-cyan-400 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-gray-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-gray-800 disabled:text-gray-600"
               >
-                {isScheduling ? 'Scheduling...' : 'Schedule Publishing'}
+                {isScheduling ? (editingScheduledPostId ? 'Rescheduling...' : 'Scheduling...') : editingScheduledPostId ? 'Reschedule Publishing' : 'Schedule Publishing'}
               </button>
             </div>
 

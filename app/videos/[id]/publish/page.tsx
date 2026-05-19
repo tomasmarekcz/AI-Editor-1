@@ -18,7 +18,13 @@ type ScheduledPostView = {
   id: string;
   platform: string;
   status: string;
+  caption: string | null;
+  title: string | null;
+  description: string | null;
+  privacy_status: string;
   scheduled_for: string;
+  timezone: string | null;
+  thumbnail_storage_path: string | null;
   platform_post_url: string | null;
   error_message: string | null;
 };
@@ -64,17 +70,18 @@ export default async function PublishVideoPage({ params }: { params: { id: strin
       .maybeSingle<YouTubeConnection>(),
     supabase
       .from('scheduled_posts')
-      .select('id,platform,status,scheduled_for,platform_post_url,error_message')
+      .select('id,platform,status,caption,title,description,privacy_status,scheduled_for,timezone,thumbnail_storage_path,platform_post_url,error_message')
       .eq('video_id', video.id)
       .eq('account_id', account.id)
       .order('created_at', { ascending: false })
       .limit(5),
   ]);
 
+  const editableScheduledPost = (scheduledPosts ?? []).find((post) => post.platform === 'youtube' && post.status === 'scheduled');
   const fallbackThumbnailPath = (thumbnailAssets ?? []).find((asset) => asset.kind === 'thumbnail')?.storage_path
     ?? (thumbnailAssets ?? []).find((asset) => asset.kind === 'image' || asset.kind === 'uploaded_image')?.storage_path
     ?? null;
-  const thumbnailPath = video.thumbnail_path ?? fallbackThumbnailPath ?? null;
+  const thumbnailPath = editableScheduledPost?.thumbnail_storage_path ?? video.thumbnail_path ?? fallbackThumbnailPath ?? null;
 
   const videoPath = video.final_video_path;
   const [videoUrl, thumbnailUrl] = await Promise.all([
