@@ -5,18 +5,6 @@ import { logWorkerEvent } from '@/lib/worker/log';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVE_STATUSES = new Set([
-  'queued',
-  'processing',
-  'generating',
-  'processing_images',
-  'generating_images',
-  'generating_voice',
-  'transcribing',
-  'rendering',
-  'uploading',
-]);
-
 type VideoRow = {
   id: string;
   user_id: string;
@@ -46,12 +34,16 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   if (!video) {
     return Response.json({ error: 'Video not found' }, { status: 404 });
   }
-  const isResumeCheckpoint = ['script_saved', 'script_segmented', 'images_saved', 'audio_saved', 'subtitles_saved', 'final_uploaded'].includes(video.current_step ?? '');
-  if (ACTIVE_STATUSES.has(video.status) && !isResumeCheckpoint) {
-    return Response.json({
-      error: 'Video is currently being processed. Wait until it finishes or fails before deleting it.',
-    }, { status: 409 });
-  }
+
+  await db
+    .from('videos')
+    .update({
+      current_step: 'deleting',
+      locked_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', video.id)
+    .eq('account_id', account.id);
 
   const { data: assets, error: assetsError } = await db
     .from('video_assets')
