@@ -12,6 +12,10 @@ node_modules
 
 public/tmp/
 
+tmp/
+
+scripts/*.local.ts
+
 *.tsbuildinfo
 
 npm-debug.log*

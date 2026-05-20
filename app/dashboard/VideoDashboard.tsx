@@ -4,7 +4,12 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { SubtitlePreview } from '../components/SubtitlePreview';
 import { VOICE_PRESETS } from '@/lib/voicePresets';
-import { GEMINI_TTS_PRESETS, GEMINI_TTS_VOICES, GEMINI_TTS_PRESET_ORDER } from '@/lib/geminiTtsPresets';
+import {
+  FEATURED_GEMINI_TTS_VOICES,
+  GEMINI_TTS_PRESETS,
+  GEMINI_TTS_VOICES,
+  GEMINI_TTS_PRESET_ORDER,
+} from '@/lib/geminiTtsPresets';
 import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_SUBTITLE_SETTINGS, DEFAULT_VIDEO_SETTINGS, mergeVideoSettings } from '@/lib/projects/defaults';
 import { estimateVideoCost, formatUsd, type CostEstimate, type CostLine } from '@/lib/pricing';
@@ -32,6 +37,10 @@ const OPENAI_VOICES: { id: TTSVoice; label: string; desc: string }[] = [
   { id: 'echo',  label: 'Echo',  desc: 'Vyvážený, univerzální' },
   { id: 'fable', label: 'Fable', desc: 'Vyprávěcí, dynamický' },
 ];
+
+const FEATURED_GEMINI_VOICE_OPTIONS = GEMINI_TTS_VOICES.filter((voice) => (
+  FEATURED_GEMINI_TTS_VOICES.includes(voice.id)
+));
 
 const PRESET_ORDER: VoicePreset[] = ['hype', 'storyteller', 'mystery', 'business', 'documentary', 'custom'];
 
@@ -168,6 +177,8 @@ export default function VideoDashboard({
   const [settingsSaveMsg, setSettingsSaveMsg] = useState('');
   const [hasSavedFirstVideoDefaults, setHasSavedFirstVideoDefaults] = useState(!shouldSaveFirstVideoDefaults);
   const [showFontModal, setShowFontModal] = useState(false);
+  const [showGeminiVoiceModal, setShowGeminiVoiceModal] = useState(false);
+  const [previewingGeminiVoice, setPreviewingGeminiVoice] = useState<GeminiTTSVoice | null>(null);
   const [imageLightbox, setImageLightbox] = useState<ImageLightboxState>(null);
 
   // Review-step state
@@ -175,11 +186,34 @@ export default function VideoDashboard({
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const setS = <K extends keyof VideoSettings>(k: K, v: VideoSettings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
   const setSub = (patch: Partial<SubtitleSettings>) =>
     setSettings((s) => ({ ...s, subtitle: { ...s.subtitle, ...patch } }));
+
+  const playGeminiVoicePreview = useCallback((voice: GeminiTTSVoice) => {
+    const current = voicePreviewAudioRef.current;
+    if (current && previewingGeminiVoice === voice && !current.paused) {
+      current.pause();
+      current.currentTime = 0;
+      setPreviewingGeminiVoice(null);
+      return;
+    }
+
+    if (current) {
+      current.pause();
+      current.currentTime = 0;
+    }
+
+    const audio = new Audio(`/api/voice-previews/gemini/${encodeURIComponent(voice)}`);
+    voicePreviewAudioRef.current = audio;
+    setPreviewingGeminiVoice(voice);
+    audio.addEventListener('ended', () => setPreviewingGeminiVoice(null), { once: true });
+    audio.addEventListener('error', () => setPreviewingGeminiVoice(null), { once: true });
+    void audio.play().catch(() => setPreviewingGeminiVoice(null));
+  }, [previewingGeminiVoice]);
 
   const isBusy = step === 'segmenting' || step === 'queued' || step === 'rendering' || step === 'generating-images';
 
@@ -205,6 +239,10 @@ export default function VideoDashboard({
       window.sessionStorage.removeItem(`videoScriptPrefill:${projectId}`);
     }
   }, [projectId, resumeVideo]);
+
+  useEffect(() => () => {
+    voicePreviewAudioRef.current?.pause();
+  }, []);
 
   useEffect(() => {
     if (!resumeVideo) return;
@@ -548,20 +586,44 @@ export default function VideoDashboard({
           <>
             <div>
               <SectionLabel>Hlas (mužský)</SectionLabel>
-              <div className="grid grid-cols-3 gap-1.5">
-                {GEMINI_TTS_VOICES.map((v) => (
-                  <button key={v.id} onClick={() => setS('geminiVoice', v.id as GeminiTTSVoice)}
-                    className={`py-2 px-2 rounded-lg text-left transition-colors border ${
+              <div className="grid grid-cols-2 gap-1.5">
+                {FEATURED_GEMINI_VOICE_OPTIONS.map((v) => (
+                  <div key={v.id}
+                    className={`rounded-lg transition-colors border ${
                       settings.geminiVoice === v.id
                         ? 'bg-blue-600 border-blue-500 text-white'
                         : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600'
                     }`}
                   >
-                    <div className="font-semibold text-sm">{v.label}</div>
-                    <div className="text-[10px] opacity-60 leading-tight">{v.desc}</div>
-                  </button>
+                    <button
+                      onClick={() => setS('geminiVoice', v.id)}
+                      className="w-full px-2 pt-2 text-left"
+                    >
+                      <div className="font-semibold text-sm">{v.label}</div>
+                      <div className="text-[10px] opacity-60 leading-tight">{v.desc}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => playGeminiVoicePreview(v.id)}
+                      className="mt-1 flex w-full items-center justify-center gap-1 border-t border-white/10 px-2 py-1.5 text-[11px] font-semibold text-blue-100/90 transition hover:bg-white/10"
+                    >
+                      <span>{previewingGeminiVoice === v.id ? '■' : '▶'}</span>
+                      <span>{previewingGeminiVoice === v.id ? 'Stop' : 'Preview'}</span>
+                    </button>
+                  </div>
                 ))}
               </div>
+              {!FEATURED_GEMINI_TTS_VOICES.includes(settings.geminiVoice) && (
+                <div className="mt-1.5 px-3 py-1.5 bg-blue-900/40 border border-blue-700/60 rounded-lg text-sm text-blue-200">
+                  ✓ {settings.geminiVoice}
+                </div>
+              )}
+              <button
+                onClick={() => setShowGeminiVoiceModal(true)}
+                className="mt-1.5 w-full py-1.5 rounded-lg text-[12px] text-gray-500 hover:text-gray-300 border border-dashed border-gray-700 hover:border-gray-500 transition-colors"
+              >
+                Více hlasů… ({GEMINI_TTS_VOICES.length})
+              </button>
             </div>
 
             <div>
@@ -1620,6 +1682,54 @@ export default function VideoDashboard({
                     AaBbCc 123
                   </span>
                 </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Gemini voice picker modal ───────────────────────────────────── */}
+      {showGeminiVoiceModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowGeminiVoiceModal(false)}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white">Vyberte Gemini hlas</h3>
+              <button onClick={() => setShowGeminiVoiceModal(false)}
+                className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+            </div>
+            <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto pr-1 sm:grid-cols-2">
+              {GEMINI_TTS_VOICES.map((voice) => (
+                <div
+                  key={voice.id}
+                  className={`rounded-xl border transition-colors ${
+                    settings.geminiVoice === voice.id
+                      ? 'border-blue-500 bg-blue-700 text-white'
+                      : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => { setS('geminiVoice', voice.id); setShowGeminiVoiceModal(false); }}
+                    className="w-full px-4 py-3 text-left"
+                  >
+                    <span className="block text-base font-bold leading-tight">{voice.label}</span>
+                    <span className="block mt-0.5 text-[11px] text-gray-400">{voice.desc}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playGeminiVoicePreview(voice.id)}
+                    className="flex w-full items-center justify-center gap-1 border-t border-white/10 px-4 py-2 text-[12px] font-semibold text-blue-100/90 transition hover:bg-white/10"
+                  >
+                    <span>{previewingGeminiVoice === voice.id ? '■' : '▶'}</span>
+                    <span>{previewingGeminiVoice === voice.id ? 'Stop preview' : 'Play preview'}</span>
+                  </button>
+                </div>
               ))}
             </div>
           </div>

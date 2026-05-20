@@ -75,13 +75,32 @@ Unhurried but never boring — every word matters.`,
   },
 };
 
-export type GeminiTTSVoice = 'Charon' | 'Fenrir' | 'Puck';
+export type GeminiTTSVoice =
+  | 'Puck'
+  | 'Charon'
+  | 'Fenrir'
+  | 'Orus'
+  | 'Iapetus'
+  | 'Algenib'
+  | 'Rasalgethi'
+  | 'Schedar'
+  | 'Achird'
+  | 'Sadaltager';
 
 export const GEMINI_TTS_VOICES: { id: GeminiTTSVoice; label: string; desc: string }[] = [
-  { id: 'Fenrir', label: 'Fenrir', desc: 'Energický, dynamický' },
-  { id: 'Charon', label: 'Charon', desc: 'Hluboký, autoritativní' },
-  { id: 'Puck',   label: 'Puck',   desc: 'Mladý, vyprávěcí' },
+  { id: 'Puck',       label: 'Puck',       desc: 'Upbeat creator voice' },
+  { id: 'Charon',     label: 'Charon',     desc: 'Informativní dokumentární tón' },
+  { id: 'Fenrir',     label: 'Fenrir',     desc: 'Excitable, energický' },
+  { id: 'Orus',       label: 'Orus',       desc: 'Firm, autoritativní' },
+  { id: 'Iapetus',    label: 'Iapetus',    desc: 'Clear, čistý voiceover' },
+  { id: 'Algenib',    label: 'Algenib',    desc: 'Gravelly, dramatický' },
+  { id: 'Rasalgethi', label: 'Rasalgethi', desc: 'Informative storytelling' },
+  { id: 'Schedar',    label: 'Schedar',    desc: 'Even, stabilní narrace' },
+  { id: 'Achird',     label: 'Achird',     desc: 'Friendly, přístupný tón' },
+  { id: 'Sadaltager', label: 'Sadaltager', desc: 'Knowledgeable explainer' },
 ];
+
+export const FEATURED_GEMINI_TTS_VOICES: GeminiTTSVoice[] = ['Puck', 'Charon'];
 
 export const GEMINI_TTS_PRESET_ORDER: GeminiTTSPreset[] = [
   'hype', 'storyteller', 'mystery', 'business', 'documentary', 'custom',
