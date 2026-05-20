@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireAccountApi } from '@/lib/accounts';
 import { generateOpenAIImage, OPENAI_IMAGE_MODEL } from '@/lib/generateWithOpenAIImage';
+import { generateGeminiContent } from '@/lib/geminiApi';
 import { GEMINI_CAPTION_MODEL } from '@/lib/models';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import { costGeminiText, costOpenAIImage2Low, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
@@ -30,18 +31,12 @@ async function generateThumbnailPrompt({
   video: Pick<SavedVideo, 'title' | 'original_script'>;
   project: Pick<Project, 'name' | 'niche' | 'visual_style'> | null;
 }) {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_CAPTION_MODEL}:generateContent?key=${apiKey}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{
-          text: `## # Thumbnail prompt generation system
+  const data = await generateGeminiContent<{
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  }>(GEMINI_CAPTION_MODEL, {
+    systemInstruction: {
+      parts: [{
+        text: `## # Thumbnail prompt generation system
 
 You are a viral short-form thumbnail creative director.
 
@@ -90,12 +85,12 @@ Generate:
 - strong emotional focus
 
 Output ONLY the final image-generation prompt. ##`,
-        }],
-      },
-      contents: [{
-        role: 'user',
-        parts: [{
-          text: `Video title:
+      }],
+    },
+    contents: [{
+      role: 'user',
+      parts: [{
+        text: `Video title:
 ${video.title}
 
 Original script:
@@ -109,23 +104,14 @@ ${project?.niche || 'Not available'}
 
 Visual style:
 ${project?.visual_style || 'High contrast cinematic short-form video thumbnail'}`,
-        }],
       }],
-      generationConfig: {
-        temperature: 0.8,
-        maxOutputTokens: 180,
-      },
-    }),
+    }],
+    generationConfig: {
+      temperature: 0.8,
+      maxOutputTokens: 180,
+    },
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${body.slice(0, 300)}`);
-  }
-
-  const data = await res.json() as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
   const prompt = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!prompt) throw new Error('Gemini returned an empty thumbnail prompt');
   return prompt;

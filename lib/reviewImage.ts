@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { ImageGenMode } from '@/types';
+import { generateGeminiContent } from '@/lib/geminiApi';
 
 const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
@@ -10,13 +11,7 @@ export interface ReviewResult {
   reason?: string;
 }
 
-// ── Upload image to Gemini Files API ─────────────────────────────────────────
-async function uploadToFilesAPI(
-  localImagePath: string,
-): Promise<{ uri: string; mimeType: string }> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
-
+function readImageAsInlineData(localImagePath: string): { data: string; mimeType: string } {
   // Resolve disk path: localImagePath is like /tmp/images/xxx.jpg (relative to public/)
   const absPath = localImagePath.startsWith('/')
     ? path.join(process.cwd(), 'public', localImagePath)
@@ -30,54 +25,7 @@ async function uploadToFilesAPI(
     ext === '.gif'  ? 'image/gif'  :
     'image/jpeg';
 
-  // ── Step 1: Start resumable upload ──────────────────────────────────────
-  const initRes = await fetch(
-    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: {
-        'X-Goog-Upload-Protocol': 'resumable',
-        'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': String(buffer.length),
-        'X-Goog-Upload-Header-Content-Type': mimeType,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ file: { display_name: path.basename(absPath) } }),
-    },
-  );
-
-  if (!initRes.ok) {
-    const body = await initRes.text();
-    throw new Error(`Files API init failed ${initRes.status}: ${body.slice(0, 200)}`);
-  }
-
-  const uploadUrl = initRes.headers.get('x-goog-upload-url');
-  if (!uploadUrl) throw new Error('Files API: no upload URL in response headers');
-
-  // ── Step 2: Upload binary data ───────────────────────────────────────────
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'X-Goog-Upload-Command': 'upload, finalize',
-      'X-Goog-Upload-Offset': '0',
-      'Content-Type': mimeType,
-    },
-    body: buffer,
-  });
-
-  if (!uploadRes.ok) {
-    const body = await uploadRes.text();
-    throw new Error(`Files API upload failed ${uploadRes.status}: ${body.slice(0, 200)}`);
-  }
-
-  const data = (await uploadRes.json()) as {
-    file?: { uri?: string; mimeType?: string };
-  };
-
-  const uri = data.file?.uri;
-  if (!uri) throw new Error('Files API: no file URI in response');
-
-  return { uri, mimeType: data.file?.mimeType ?? mimeType };
+  return { data: buffer.toString('base64'), mimeType };
 }
 
 // ── Main reviewer ─────────────────────────────────────────────────────────────
@@ -88,11 +36,7 @@ export async function reviewImage(
   mode: ImageGenMode,
   currentPrompt: string,
 ): Promise<ReviewResult> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
-
-  // Upload the image to Gemini Files API
-  const { uri, mimeType } = await uploadToFilesAPI(localImagePath);
+  const inlineData = readImageAsInlineData(localImagePath);
 
   const promptTypeHint =
     mode === 'google'
@@ -315,37 +259,24 @@ Query/prompt used: "${currentPrompt}"
 
 Review the attached image and decide if it is suitable.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { fileData: { fileUri: uri, mimeType } },
-            { text: userContent },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.1,
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Gemini review error ${res.status}: ${body.slice(0, 300)}`);
-  }
-
-  const data = (await res.json()) as {
+  const data = await generateGeminiContent<{
     candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
+  }>(GEMINI_MODEL, {
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inlineData },
+          { text: userContent },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1,
+    },
+  });
 
   const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '{"approved":true}';
 

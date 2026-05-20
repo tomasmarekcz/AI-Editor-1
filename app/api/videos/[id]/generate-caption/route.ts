@@ -1,4 +1,5 @@
 import { requireAccountApi } from '@/lib/accounts';
+import { generateGeminiContent } from '@/lib/geminiApi';
 import { GEMINI_CAPTION_MODEL } from '@/lib/models';
 import { enforcePaidPlan } from '@/lib/planGuardrails';
 import type { Project, SavedVideo } from '@/lib/projects/types';
@@ -11,32 +12,16 @@ type CaptionRequest = {
 };
 
 async function callGeminiCaption(systemPrompt: string, userPrompt: string) {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_CAPTION_MODEL}:generateContent?key=${apiKey}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-      generationConfig: {
-        temperature: 0.75,
-        maxOutputTokens: 180,
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${body.slice(0, 300)}`);
-  }
-
-  const data = await res.json() as {
+  const data = await generateGeminiContent<{
     candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
+  }>(GEMINI_CAPTION_MODEL, {
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: 0.75,
+      maxOutputTokens: 180,
+    },
+  });
 
   const caption = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!caption) throw new Error('Gemini returned an empty caption');

@@ -19,10 +19,11 @@ import {
   uploadLocalAsset,
   VIDEO_ASSETS_BUCKET,
 } from '@/lib/storage/videoAssets';
-import { costGeminiText, costOpenAIImage2Low, costOpenAIText, PRICING, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
+import { costGeminiText, costGeminiTts, costOpenAIImage2Low, costOpenAIText, estimateGeminiTtsUsage, PRICING, openAIImage2Usage, roundCost, type CostLine } from '@/lib/pricing';
 import { insertUsageEvents, summarizeCostLines } from '@/lib/usage/record';
 import { generateEffects } from '@/lib/generateEffects';
 import { logWorkerEvent } from '@/lib/worker/log';
+import { GEMINI_TTS_MODEL } from '@/lib/models';
 import type { ImageGenMode, ImageSource, PipelineEvent, SegmentData, VideoEffect, VideoSettings } from '@/types';
 
 type RunVideoPipelineInput = {
@@ -617,12 +618,16 @@ export async function runVideoPipeline({
   const ttsText = processed.map((s) => s.audioText ?? s.text).join('\n\n');
   const ttsMinutes = Math.max(1 / 60, audioDurationSeconds / 60);
   if (settings.ttsProvider === 'gemini') {
+    const geminiTtsUsage = estimateGeminiTtsUsage(ttsText, audioDurationSeconds);
     actualCostLines.push({
       provider: 'google',
-      model: 'gemini-2.5-flash-preview-tts',
+      model: GEMINI_TTS_MODEL,
       step: 'tts',
-      usage: { characters: ttsText.length, audioSeconds: audioDurationSeconds },
-      costUsd: roundCost(ttsMinutes * PRICING.google['gemini-2.5-flash-preview-tts'].estimatedUsdPerMinute),
+      usage: { characters: ttsText.length, ...geminiTtsUsage },
+      costUsd: costGeminiTts(
+        geminiTtsUsage.estimatedInputTokens,
+        geminiTtsUsage.estimatedAudioOutputTokens,
+      ),
     });
   } else if (settings.ttsProvider === 'elevenlabs') {
     actualCostLines.push({

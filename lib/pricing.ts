@@ -1,6 +1,6 @@
 import type { VideoSettings } from '@/types';
 import type { Orientation } from '@/types';
-import { OPENAI_SCRIPT_GENERATION_MODEL } from '@/lib/models';
+import { GEMINI_TTS_MODEL, OPENAI_SCRIPT_GENERATION_MODEL } from '@/lib/models';
 import { OPENAI_IMAGE_MODEL, OPENAI_IMAGE_QUALITY, openAIImageSizeForOrientation } from '@/lib/generateWithOpenAIImage';
 
 export const PRICING = {
@@ -33,7 +33,6 @@ export const PRICING = {
     'gemini-2.5-flash-preview-tts': {
       textInputUsdPer1MTokens: 0.50,
       audioOutputUsdPer1MTokens: 10.0,
-      estimatedUsdPerMinute: 0.012,
     },
   },
   serper: {
@@ -43,6 +42,8 @@ export const PRICING = {
     eleven_multilingual_v2: { usdPer1KCharacters: 0.10 },
   },
 } as const;
+
+export const GEMINI_TTS_AUDIO_OUTPUT_TOKENS_PER_SECOND = 25;
 
 export type CostLine = {
   provider: string;
@@ -98,6 +99,23 @@ export function costOpenAIModelText(model: keyof typeof PRICING.openai, inputTok
 export function costGeminiText(inputTokens: number, outputTokens: number) {
   const p = PRICING.google['gemini-2.5-flash-lite'];
   return roundCost((inputTokens / 1_000_000) * p.inputUsdPer1MTokens + (outputTokens / 1_000_000) * p.outputUsdPer1MTokens);
+}
+
+export function estimateGeminiTtsUsage(text: string, audioSeconds: number) {
+  return {
+    estimatedInputTokens: estimateTokens(text),
+    estimatedAudioOutputTokens: Math.max(1, Math.ceil(audioSeconds * GEMINI_TTS_AUDIO_OUTPUT_TOKENS_PER_SECOND)),
+    estimatedAudioSeconds: audioSeconds,
+    audioOutputTokensPerSecond: GEMINI_TTS_AUDIO_OUTPUT_TOKENS_PER_SECOND,
+  };
+}
+
+export function costGeminiTts(textInputTokens: number, audioOutputTokens: number) {
+  const p = PRICING.google['gemini-2.5-flash-preview-tts'];
+  return roundCost(
+    (textInputTokens / 1_000_000) * p.textInputUsdPer1MTokens +
+    (audioOutputTokens / 1_000_000) * p.audioOutputUsdPer1MTokens,
+  );
 }
 
 export function costOpenAIImage2Low(images: number, orientation: Orientation) {
@@ -238,12 +256,13 @@ export function estimateVideoCost(
   }
 
   if (settings.ttsProvider === 'gemini') {
+    const usage = estimateGeminiTtsUsage(script, audioSeconds);
     lines.push({
       provider: 'google',
-      model: 'gemini-2.5-flash-preview-tts',
+      model: GEMINI_TTS_MODEL,
       step: 'tts',
-      usage: { estimatedCharacters: script.length, estimatedAudioSeconds: audioSeconds },
-      costUsd: roundCost(audioMinutes * PRICING.google['gemini-2.5-flash-preview-tts'].estimatedUsdPerMinute),
+      usage: { estimatedCharacters: script.length, ...usage },
+      costUsd: costGeminiTts(usage.estimatedInputTokens, usage.estimatedAudioOutputTokens),
     });
   } else if (settings.ttsProvider === 'elevenlabs') {
     lines.push({

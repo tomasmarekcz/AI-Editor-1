@@ -1,32 +1,18 @@
+import { generateGeminiContent } from '@/lib/geminiApi';
+
 const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
 async function callGemini(systemPrompt: string, userContent: string): Promise<string> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts: [{ text: userContent }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.4,
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Gemini error ${res.status}: ${body.slice(0, 300)}`);
-  }
-
-  const data = await res.json() as {
+  const data = await generateGeminiContent<{
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
+  }>(GEMINI_MODEL, {
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: 'user', parts: [{ text: userContent }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.4,
+    },
+  });
   return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
 }
 

@@ -3,11 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import type { VideoSettings } from '@/types';
+import { generateGeminiContent } from '@/lib/geminiApi';
+import { GEMINI_TTS_MODEL } from '@/lib/models';
 import { VOICE_PRESETS } from './voicePresets';
 import { GEMINI_TTS_PRESETS } from './geminiTtsPresets';
 import { ELEVENLABS_PRESETS, ELEVENLABS_VOICE_ID } from './elevenLabsPresets';
-
-const GEMINI_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
 
 function probeAudioDuration(filepath: string): number | null {
   try {
@@ -140,9 +140,6 @@ async function generateGeminiVoiceover(
   outputPath: string,
   settings: VideoSettings,
 ): Promise<void> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY is not set');
-
   const dir = path.dirname(outputPath);
   const base = path.basename(outputPath, '.mp3');
   const pcmPath = path.join(dir, `${base}.pcm`);
@@ -151,11 +148,12 @@ async function generateGeminiVoiceover(
     settings.geminiPreset === 'custom'
       ? settings.geminiCustomPrompt.trim()
       : GEMINI_TTS_PRESETS[settings.geminiPreset].prompt;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent?key=${apiKey}`;
+  const inputText = stylePrompt
+    ? `${stylePrompt}\n\nText to synthesize:\n${text}`
+    : text;
 
   const body: Record<string, unknown> = {
-    contents: [{ role: 'user', parts: [{ text }] }],
+    contents: [{ role: 'user', parts: [{ text: inputText }] }],
     generationConfig: {
       responseModalities: ['AUDIO'],
       speechConfig: {
@@ -165,26 +163,12 @@ async function generateGeminiVoiceover(
       },
     },
   };
-  if (stylePrompt) {
-    body.systemInstruction = { parts: [{ text: stylePrompt }] };
-  }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini TTS error ${res.status}: ${err.slice(0, 300)}`);
-  }
-
-  const data = await res.json() as {
+  const data = await generateGeminiContent<{
     candidates?: Array<{
       content?: { parts?: Array<{ inlineData?: { data?: string } }> };
     }>;
-  };
+  }>(GEMINI_TTS_MODEL, body);
 
   const b64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!b64) throw new Error('Gemini TTS returned no audio data');
