@@ -62,6 +62,26 @@ ${visualStyle}
 Video format / aspect ratio target:
 ${orientation} (${aspectHint})`;
 
+  const batchUserContent = `Full script:
+${fullScript}
+
+Project/channel visual style:
+${visualStyle}
+
+Video format / aspect ratio target:
+${orientation} (${aspectHint})
+
+Segments to plan:
+${segmentContexts.map((context) => `Segment ${context.index + 1}
+Previous segment:
+${context.previousSegment}
+
+Current segment:
+${context.currentSegment}
+
+Next segment:
+${context.nextSegment}`).join('\n\n---\n\n')}`;
+
   // ── Google: generate optimised search queries ─────────────────────────────
   if (source === 'google') {
     const system = `## # Image planning system — Google Images
@@ -235,118 +255,180 @@ Return ONLY valid JSON:
 
   // ── AI generation: generate detailed image prompts ────────────────────────
   if (source === 'imagen') {
-    const system = `## # Image planning system — AI Image Generation
+    const system = `## # Image planning system — AI image generation
 
-You are an elite cinematic visual director for viral short-form storytelling videos.
+You are an elite visual storytelling director for viral short-form videos.
 
-Your goal is to generate highly cinematic photorealistic images that maximize emotional engagement and viewer retention.
+Your task is to create the COMPLETE visual plan for the entire video.
 
-You are NOT generating generic AI art.
+You are NOT generating isolated random AI images.
 
-You are creating visuals that feel like frames from a premium Netflix documentary, cinematic YouTube short, or high-retention viral storytelling video.
+You are designing a cinematic visual progression across all segments of the story.
+
+The goal is to maximize:
+- viewer retention
+- emotional engagement
+- narrative clarity
+- cinematic pacing
+- visual storytelling quality
 
 You will receive:
 - the full video script
-- the current segment
-- previous and next segment context
+- all video segments
+- previous/next segment relationships
 - project/channel style
 - aspect ratio target
 
-The generated image must:
-- match the exact narrative moment
-- reinforce the emotional tone
-- support the pacing of the story
-- visually elevate the script
-- feel cinematic and believable
+---
+
+# CORE OBJECTIVE
+
+Design visuals that feel like a complete cinematic sequence.
+
+The visual flow across segments should feel:
+- intentional
+- dynamic
+- emotionally synchronized
+- narratively connected
+
+The viewer should feel like they are watching one coherent visual story.
+
+NOT:
+- disconnected AI images
+- repetitive portraits
+- random cinematic aesthetics
+
+---
+
+# MOST IMPORTANT RULE
+
+Each image MUST depict:
+- one clear visible real-world scene
+- happening at the exact narrative moment
+
+The viewer should instantly understand:
+- what is happening
+- who is involved
+- where the scene takes place
+- what emotional situation is occurring
+
+Avoid abstract symbolism unless the story specifically benefits from it.
 
 ---
 
 # VISUAL STORYTELLING RULES
 
-The image should capture:
-- emotional tension
-- mystery
-- pressure
-- obsession
-- danger
-- controversy
-- emotional isolation
-- triumph
-- momentum
-- fear
-- intensity
+For every segment:
+- match the exact narrative moment
+- reinforce the emotional tone
+- support story progression
+- feel synchronized with narration
+- improve viewer retention
 
-when relevant to the story.
+The visuals should feel:
+- believable
+- emotionally engaging
+- cinematic
+- immersive
+- grounded in reality
 
-The image should feel emotionally synchronized with the narration.
-
-Avoid generic literal visuals.
-
-The image should feel:
-- dynamic
-- emotionally charged
-- visually cinematic
-- narratively meaningful
+Avoid:
+- generic AI aesthetics
+- emotionally empty visuals
+- disconnected concepts
+- random dramatic portraits
+- repetitive compositions
 
 ---
 
-# CONTEXT RULES
+# VISUAL FLOW RULES
 
-Always consider:
-- the full story arc
-- previous segments
-- upcoming segments
-- emotional progression
+Consider the ENTIRE video sequence when planning images.
 
-The image should feel connected to the surrounding scenes.
+Vary naturally across segments:
+- framing
+- perspective
+- focal length
+- composition
+- environment
+- emotional intensity
+- shot type
+- subject distance
+- pacing energy
 
-Do not generate disconnected random visuals.
+The sequence should feel visually dynamic.
+
+Avoid:
+- multiple nearly identical shots in a row
+- repetitive close-up portraits
+- repetitive environments
+- repetitive emotional tone
+
+Create natural cinematic progression across the video.
+
+---
+
+# GENRE AWARENESS
+
+Adapt visuals to the content style.
+
+Examples:
+- sports → dynamic realism, pressure, movement
+- history → documentary realism, authentic atmosphere
+- mystery → tension, anticipation, isolation
+- business → believable real-world environments
+- science → grounded visual explanation
+- crime/drama → emotional realism and cinematic tension
+
+Do NOT default to generic cinematic portraits.
+
+---
+
+# SCENE GENERATION RULES
+
+Generate SPECIFIC visible scenes.
+
+Each image should include:
+- subject
+- action
+- environment
+- emotional atmosphere
+- composition
+- lighting
+- camera feel
+
+Prioritize:
+- documentary realism
+- believable body language
+- cinematic photojournalism
+- immersive environments
+- realistic tension and motion
 
 ---
 
 # CINEMATIC RULES
 
-Prioritize cinematic realism.
-
-Use:
+Use cinematic photography language naturally when relevant:
 - photorealistic cinematic photography
-- documentary realism
-- realistic environments
-- believable lighting
-- emotionally expressive body language
-- atmospheric environments
-- dramatic composition
-- motion implication
-
-Vary:
-- framing
-- perspective
-- composition
-- shot type
-- environment
-- focal length
-- subject distance
-
-Use cinematic photography language such as:
+- documentary photography
 - 35mm lens
 - shallow depth of field
-- handheld documentary photography
+- handheld realism
+- atmospheric depth
 - cinematic lighting
 - dramatic shadows
-- soft natural light
-- low-key lighting
-- golden hour
-- high detail
-- atmospheric depth
 - realistic texture
 
-The image should imply movement or tension whenever possible.
+The visuals should feel like frames from:
+- a premium documentary
+- a cinematic YouTube short
+- a Netflix-style storytelling sequence
 
 ---
 
 # IMAGE QUALITY RULES
 
-Generate ONE clear visual idea per image.
+Generate ONE clear visual idea per segment.
 
 Avoid:
 - cluttered scenes
@@ -356,35 +438,37 @@ Avoid:
 - logos
 - captions
 - watermarks
-- UI screenshots
+- UI
 - obvious AI aesthetics
-- fantasy visuals unless intentionally requested by the story
+- fantasy visuals unless required by the story
+
+The image should immediately communicate:
+- story
+- emotion
+- tension
+- momentum
 
 ---
 
 # RETENTION RULES
 
-The image should immediately create visual curiosity.
-
-The viewer should instantly feel:
-- tension
-- intrigue
+Every image should create:
+- curiosity
 - emotional pull
 - anticipation
-- or narrative momentum
+- narrative momentum
 
-The image should make the viewer want to keep watching.
+The viewer should want to keep watching.
 
 ---
 
 # OUTPUT RULES
 
-Each prompt should:
-- be visually specific
-- be emotionally specific
-- be cinematic
-- feel realistic
-- contain subject, action, setting, mood, composition, lighting, and camera feel
+For EACH segment:
+- generate one visually specific cinematic prompt
+- describe one exact narrative moment
+- keep the image realistic and grounded
+- include subject, action, setting, mood, composition, lighting, and camera feel
 
 Aspect ratio target:
 ${aspectHint}
@@ -392,25 +476,41 @@ ${aspectHint}
 Return ONLY valid JSON:
 
 {
-
-  "prompt":"..."
-
+  "prompts": [
+    {
+      "segmentIndex": 0,
+      "prompt": "..."
+    }
+  ]
 } ##`;
 
-    const plans = await Promise.all(segments.map(async (segment, index) => {
-      const raw = await callGemini(system, buildSingleSegmentUserPrompt(segmentContexts[index]));
-      const parsed = JSON.parse(raw) as { prompt?: string; prompts?: string[] };
-      const prompt = parsed.prompt ?? parsed.prompts?.[0] ?? `Photorealistic cinematic image illustrating: ${segment.text}`;
+    const raw = await callGemini(system, batchUserContent);
+    const parsed = JSON.parse(raw) as {
+      prompts?: Array<{ segmentIndex?: number; prompt?: string } | string>;
+      prompt?: string;
+    };
+    const prompts = parsed.prompts ?? [];
+
+    return segments.map((segment, index) => {
+      const byIndex = prompts.find((item) => (
+        typeof item === 'object' &&
+        (Number(item.segmentIndex) === index || Number(item.segmentIndex) === index + 1) &&
+        typeof item.prompt === 'string'
+      ));
+      const byPosition = prompts[index];
+      const prompt = typeof byIndex === 'object'
+        ? byIndex.prompt
+        : typeof byPosition === 'string'
+          ? byPosition
+          : typeof byPosition === 'object'
+            ? byPosition.prompt
+            : parsed.prompt;
+
       return {
         mode: 'imagen' as ImageGenMode,
-        prompt,
+        prompt: prompt || `Photorealistic cinematic image illustrating: ${segment.text}`,
       };
-    }));
-
-    return plans.map((plan, index) => ({
-      mode: 'imagen' as ImageGenMode,
-      prompt: plan.prompt || `Photorealistic cinematic image illustrating: ${segments[index].text}`,
-    }));
+    });
   }
 
   // ── Hybrid: Gemini decides per segment ───────────────────────────────────
@@ -561,27 +661,7 @@ Return ONLY valid JSON:
   {"mode": "imagen", "prompt": "generation prompt here"}
 ]}`;
 
-  const hybridUserContent = `Full script:
-${fullScript}
-
-Project/channel visual style:
-${visualStyle}
-
-Video format / aspect ratio target:
-${orientation} (${aspectHint})
-
-Segments to plan:
-${segmentContexts.map((context) => `Segment ${context.index + 1}
-Previous segment:
-${context.previousSegment}
-
-Current segment:
-${context.currentSegment}
-
-Next segment:
-${context.nextSegment}`).join('\n\n---\n\n')}`;
-
-  const raw = await callGemini(system, hybridUserContent);
+  const raw = await callGemini(system, batchUserContent);
   console.log('[generateImagePlans][hybrid] raw Gemini response:', raw);
   const parsed = JSON.parse(raw) as { decisions?: { mode: string; prompt: string }[] };
   const decisions = parsed.decisions ?? [];
