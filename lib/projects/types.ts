@@ -11,7 +11,6 @@ export type Project = {
   visual_style: string;
   caption_style: string;
   default_project_prompt: string;
-  default_visual_prompt: string;
   default_settings: Partial<VideoSettings> | null;
   created_at: string;
   updated_at: string;
@@ -25,7 +24,6 @@ export type ProjectFormValues = {
   visual_style: string;
   caption_style: string;
   default_project_prompt: string;
-  default_visual_prompt: string;
   ttsProvider: VideoSettings['ttsProvider'];
   orientation: VideoSettings['orientation'];
   imageSource: VideoSettings['imageSource'];

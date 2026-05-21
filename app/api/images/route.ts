@@ -49,15 +49,12 @@ export async function POST(req: Request) {
   if (projectId) {
     const { data: project } = await supabase
       .from('projects')
-      .select('visual_style,default_visual_prompt')
+      .select('visual_style')
       .eq('id', projectId)
       .eq('account_id', account.id)
-      .maybeSingle<{ visual_style: string | null; default_visual_prompt: string | null }>();
+      .maybeSingle<{ visual_style: string | null }>();
 
-    projectVisualStyle = [
-      project?.visual_style,
-      project?.default_visual_prompt ? `Default visual prompt: ${project.default_visual_prompt}` : '',
-    ].filter(Boolean).join('\n');
+    projectVisualStyle = project?.visual_style ?? '';
   }
 
   if (projectId && videoId) {

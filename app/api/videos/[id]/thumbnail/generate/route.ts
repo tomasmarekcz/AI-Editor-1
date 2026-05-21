@@ -102,7 +102,7 @@ ${project?.name || 'Not available'}
 Niche:
 ${project?.niche || 'Not available'}
 
-Visual style:
+Visual prompt:
 ${project?.visual_style || 'High contrast cinematic short-form video thumbnail'}`,
       }],
     }],

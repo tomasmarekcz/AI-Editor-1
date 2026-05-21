@@ -15,7 +15,6 @@ const EMPTY_FORM: ProjectFormValues = {
   visual_style: '',
   caption_style: 'bold-highlight',
   default_project_prompt: '',
-  default_visual_prompt: '',
   ttsProvider: 'gemini',
   orientation: 'vertical',
   imageSource: 'google',
@@ -49,7 +48,6 @@ function formFromProject(project?: Project | null): ProjectFormValues {
     visual_style: project.visual_style,
     caption_style: project.caption_style,
     default_project_prompt: project.default_project_prompt,
-    default_visual_prompt: project.default_visual_prompt,
     ttsProvider: settings.ttsProvider,
     orientation: settings.orientation,
     imageSource: settings.imageSource,
@@ -153,7 +151,6 @@ export function ProjectsClient({
       visual_style: values.visual_style.trim(),
       caption_style: values.caption_style,
       default_project_prompt: values.default_project_prompt.trim(),
-      default_visual_prompt: values.default_visual_prompt.trim(),
       default_settings: settingsFromForm(values, editingProject?.default_settings),
     };
 
@@ -436,13 +433,13 @@ export function ProjectsClient({
 
             <label className="mt-4 block">
               <span className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-gray-500">
-                Visual style
+                Visual prompt
               </span>
               <textarea
                 value={values.visual_style}
                 onChange={(event) => updateValue('visual_style', event.target.value)}
                 rows={3}
-                placeholder="Cinematic, documentary archive photos, clean tech UI, dark psychology..."
+                placeholder="Cinematic documentary realism, vertical composition, dramatic lighting, no logos, no text..."
                 className="w-full resize-none rounded-lg border border-gray-700 bg-gray-950 px-3 py-2.5 text-white outline-none focus:border-cyan-400"
               />
             </label>
@@ -456,19 +453,6 @@ export function ProjectsClient({
                 onChange={(event) => updateValue('default_project_prompt', event.target.value)}
                 rows={3}
                 placeholder="What this channel should sound and feel like..."
-                className="w-full resize-none rounded-lg border border-gray-700 bg-gray-950 px-3 py-2.5 text-white outline-none focus:border-cyan-400"
-              />
-            </label>
-
-            <label className="mt-4 block">
-              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-gray-500">
-                Default visual prompt
-              </span>
-              <textarea
-                value={values.default_visual_prompt}
-                onChange={(event) => updateValue('default_visual_prompt', event.target.value)}
-                rows={3}
-                placeholder="Reusable visual prompt direction for generated images..."
                 className="w-full resize-none rounded-lg border border-gray-700 bg-gray-950 px-3 py-2.5 text-white outline-none focus:border-cyan-400"
               />
             </label>
