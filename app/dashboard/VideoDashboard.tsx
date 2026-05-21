@@ -233,12 +233,19 @@ export default function VideoDashboard({
       current.currentTime = 0;
     }
 
-    const audio = new Audio(`/api/voice-previews/gemini/${encodeURIComponent(voice)}`);
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = `/api/voice-previews/gemini/${encodeURIComponent(voice)}`;
     voicePreviewAudioRef.current = audio;
-    setPreviewingGeminiVoice(voice);
     audio.addEventListener('ended', () => setPreviewingGeminiVoice(null), { once: true });
     audio.addEventListener('error', () => setPreviewingGeminiVoice(null), { once: true });
-    void audio.play().catch(() => setPreviewingGeminiVoice(null));
+    audio.load();
+    void audio.play()
+      .then(() => setPreviewingGeminiVoice(voice))
+      .catch((err) => {
+        console.warn('[voice-preview] playback failed', err);
+        setPreviewingGeminiVoice(null);
+      });
   }, [previewingGeminiVoice]);
 
   const isBusy = step === 'segmenting' || step === 'queued' || step === 'rendering' || step === 'generating-images';

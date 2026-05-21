@@ -29,7 +29,7 @@ function getR2Client() {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { voice: string } },
 ) {
   const voice = decodeURIComponent(params.voice) as GeminiTTSVoice;
@@ -51,11 +51,45 @@ export async function GET(
       return NextResponse.json({ error: 'Voice preview could not be read.' }, { status: 502 });
     }
 
-    const bytes = await body.transformToByteArray();
-    return new NextResponse(Buffer.from(bytes), {
+    const buffer = Buffer.from(await body.transformToByteArray());
+    const range = request.headers.get('range');
+    const baseHeaders = {
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=86400',
+      'Content-Type': object.ContentType ?? 'audio/mpeg',
+    };
+
+    if (range) {
+      const match = range.match(/bytes=(\d*)-(\d*)/);
+      const start = match?.[1] ? Number(match[1]) : 0;
+      const requestedEnd = match?.[2] ? Number(match[2]) : buffer.byteLength - 1;
+      const end = Math.min(requestedEnd, buffer.byteLength - 1);
+
+      if (start >= buffer.byteLength || end < start) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: {
+            ...baseHeaders,
+            'Content-Range': `bytes */${buffer.byteLength}`,
+          },
+        });
+      }
+
+      const chunk = buffer.subarray(start, end + 1);
+      return new NextResponse(chunk, {
+        status: 206,
+        headers: {
+          ...baseHeaders,
+          'Content-Length': String(chunk.byteLength),
+          'Content-Range': `bytes ${start}-${end}/${buffer.byteLength}`,
+        },
+      });
+    }
+
+    return new NextResponse(buffer, {
       headers: {
-        'Content-Type': object.ContentType ?? 'audio/mpeg',
-        'Cache-Control': 'public, max-age=86400',
+        ...baseHeaders,
+        'Content-Length': String(buffer.byteLength),
       },
     });
   } catch {
