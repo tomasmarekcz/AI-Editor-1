@@ -51,7 +51,6 @@ export async function POST(req: Request, { params }: { params: { projectId: stri
         language: project.language,
         voiceStyle: project.voice_style,
         defaultProjectPrompt: project.default_project_prompt,
-        defaultVisualPrompt: project.default_visual_prompt,
       },
     });
 

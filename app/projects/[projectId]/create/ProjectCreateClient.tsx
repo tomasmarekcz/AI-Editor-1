@@ -60,7 +60,6 @@ export function ProjectCreateClient({
     projectLanguage: project.language,
     voiceStyle: project.voice_style,
     defaultProjectPrompt: project.default_project_prompt,
-    defaultVisualPrompt: project.default_visual_prompt,
   }), [
     description,
     preferredLengthSeconds,
@@ -69,7 +68,6 @@ export function ProjectCreateClient({
     project.language,
     project.voice_style,
     project.default_project_prompt,
-    project.default_visual_prompt,
   ]);
 
   async function openDashboardWithScript(nextScript: string, scriptGenerationCostLines: CostLine[] = []) {

@@ -10,7 +10,6 @@ export type ScriptProjectContext = {
   language: string;
   voiceStyle: string;
   defaultProjectPrompt?: string;
-  defaultVisualPrompt?: string;
 };
 
 export type GeneratedScriptResult = {
@@ -337,9 +336,6 @@ ${project.voiceStyle}
 Default project prompt:
 ${project.defaultProjectPrompt || 'None'}
 
-Default visual prompt:
-${project.defaultVisualPrompt || 'None'}
-
 Generate the script in the project language. Make it suitable for voiceover and short-form video.`;
 
   const fallbackEstimate = estimateScriptGenerationCost({
@@ -350,7 +346,6 @@ Generate the script in the project language. Make it suitable for voiceover and 
     projectLanguage: project.language,
     voiceStyle: project.voiceStyle,
     defaultProjectPrompt: project.defaultProjectPrompt,
-    defaultVisualPrompt: project.defaultVisualPrompt,
   });
 
   const completion = await openai.chat.completions.create({

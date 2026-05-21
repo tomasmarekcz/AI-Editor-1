@@ -142,7 +142,6 @@ export function estimateScriptGenerationCost({
   projectLanguage,
   voiceStyle,
   defaultProjectPrompt,
-  defaultVisualPrompt,
 }: {
   description: string;
   preferredLengthSeconds: number;
@@ -151,7 +150,6 @@ export function estimateScriptGenerationCost({
   projectLanguage: string;
   voiceStyle: string;
   defaultProjectPrompt?: string;
-  defaultVisualPrompt?: string;
 }): CostLine {
   const promptText = [
     description,
@@ -161,7 +159,6 @@ export function estimateScriptGenerationCost({
     projectLanguage,
     voiceStyle,
     defaultProjectPrompt ?? '',
-    defaultVisualPrompt ?? '',
   ].join('\n');
   const estimatedInputTokens = estimateTokens(promptText) + 650;
   const estimatedOutputTokens = Math.max(180, Math.ceil(preferredLengthSeconds * 6));
