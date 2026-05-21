@@ -23,6 +23,36 @@ function probeAudioDuration(filepath: string): number | null {
   }
 }
 
+function clampSpeed(speed: number | undefined) {
+  return Math.max(0.65, Math.min(1.4, Number.isFinite(speed) ? speed as number : 1));
+}
+
+function geminiPaceInstruction(speed: number) {
+  if (speed <= 0.8) {
+    return 'Speak clearly at a slow, deliberate pace. Prioritize comprehension over energy. Add natural pauses between sentences.';
+  }
+  if (speed < 0.95) {
+    return 'Speak clearly at a slightly slower than normal pace. Keep the energy, but leave enough space between words so every word is easy to understand.';
+  }
+  if (speed <= 1.05) {
+    return 'Speak at a natural, clear narrator pace. Do not rush the words.';
+  }
+  return 'Speak with controlled energy at a moderately fast pace, but keep every word understandable.';
+}
+
+function applyAudioSpeed(inputPath: string, speed: number) {
+  const normalizedSpeed = clampSpeed(speed);
+  if (Math.abs(normalizedSpeed - 1) < 0.01) return;
+
+  const parsed = path.parse(inputPath);
+  const tmpPath = path.join(parsed.dir, `${parsed.name}_speed${parsed.ext}`);
+  execSync(
+    `ffmpeg -y -i "${inputPath}" -filter:a "atempo=${normalizedSpeed.toFixed(2)}" "${tmpPath}"`,
+    { timeout: 60_000 },
+  );
+  fs.renameSync(tmpPath, inputPath);
+}
+
 /**
  * Generates a single voiceover MP3 for the entire script.
  * Segments are joined with a double newline (natural pause in TTS).
@@ -148,9 +178,11 @@ async function generateGeminiVoiceover(
     settings.geminiPreset === 'custom'
       ? settings.geminiCustomPrompt.trim()
       : GEMINI_TTS_PRESETS[settings.geminiPreset].prompt;
+  const speed = clampSpeed(settings.speed);
+  const paceInstruction = geminiPaceInstruction(speed);
   const inputText = stylePrompt
-    ? `${stylePrompt}\n\nText to synthesize:\n${text}`
-    : text;
+    ? `${stylePrompt}\n\nPacing instruction:\n${paceInstruction}\n\nText to synthesize:\n${text}`
+    : `${paceInstruction}\n\nText to synthesize:\n${text}`;
 
   const body: Record<string, unknown> = {
     contents: [{ role: 'user', parts: [{ text: inputText }] }],
@@ -176,4 +208,5 @@ async function generateGeminiVoiceover(
   fs.writeFileSync(pcmPath, Buffer.from(b64, 'base64'));
   execSync(`ffmpeg -y -f s16le -ar 24000 -ac 1 -i "${pcmPath}" "${outputPath}"`, { timeout: 60_000 });
   try { fs.unlinkSync(pcmPath); } catch { /* ignore */ }
+  applyAudioSpeed(outputPath, speed);
 }

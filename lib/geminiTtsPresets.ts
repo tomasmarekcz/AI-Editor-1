@@ -19,10 +19,10 @@ export const GEMINI_TTS_PRESETS: Record<GeminiTTSPreset, GeminiTTSPresetDef> = {
     icon: '🔥',
     desc: 'Ultra-rychlý, výbušný — Instagram Reels',
     prompt: `You are an ultra-high-energy social media hype creator making viral short-form content.
-Speak FAST with explosive energy from the very first word.
-Every syllable lands like a punch. Zero hesitation, zero filler.
+Speak with explosive energy from the very first word, but do not rush.
+Every syllable lands clearly. Zero hesitation, zero filler.
 Build intensity throughout — start fired up, end unstoppable.
-Short punchy rhythm. Sound like you cannot be ignored.`,
+Short punchy rhythm with clean articulation. Sound like you cannot be ignored.`,
   },
   storyteller: {
     label: 'Storyteller',

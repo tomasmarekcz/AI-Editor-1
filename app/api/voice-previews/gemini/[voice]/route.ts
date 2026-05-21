@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { GEMINI_TTS_VOICES, type GeminiTTSVoice } from '@/lib/geminiTtsPresets';
 
 export const runtime = 'nodejs';
@@ -46,14 +45,19 @@ export async function GET(
   const key = `gemini/${voice}.mp3`;
 
   try {
-    await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: key }));
-    const url = await getSignedUrl(
-      r2.client,
-      new GetObjectCommand({ Bucket: r2.bucket, Key: key }),
-      { expiresIn: 300 },
-    );
+    const object = await r2.client.send(new GetObjectCommand({ Bucket: r2.bucket, Key: key }));
+    const body = object.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+    if (!body?.transformToByteArray) {
+      return NextResponse.json({ error: 'Voice preview could not be read.' }, { status: 502 });
+    }
 
-    return NextResponse.redirect(url, 307);
+    const bytes = await body.transformToByteArray();
+    return new NextResponse(Buffer.from(bytes), {
+      headers: {
+        'Content-Type': object.ContentType ?? 'audio/mpeg',
+        'Cache-Control': 'public, max-age=86400',
+      },
+    });
   } catch {
     return NextResponse.json({ error: 'Voice preview was not found.' }, { status: 404 });
   }

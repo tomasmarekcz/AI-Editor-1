@@ -19,7 +19,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   voice: 'onyx',
   voicePreset: 'hype',
   customInstructions: '',
-  speed: 1.1,
+  speed: 0.9,
   hdQuality: false,
   geminiVoice: 'Fenrir',
   geminiPreset: 'hype',

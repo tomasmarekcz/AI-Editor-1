@@ -147,6 +147,32 @@ function Spinner({ size = 4 }: { size?: number }) {
   );
 }
 
+function VoicePreviewButton({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      aria-label={active ? 'Stop voice preview' : 'Play voice preview'}
+      className={`flex h-7 w-7 flex-none items-center justify-center rounded-full border text-[10px] font-black transition ${
+        active
+          ? 'border-blue-200 bg-white text-blue-700'
+          : 'border-blue-400/60 bg-blue-500/15 text-blue-100 hover:border-blue-200 hover:bg-blue-500/30'
+      }`}
+    >
+      {active ? '■' : '▶'}
+    </button>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function VideoDashboard({
   projectId,
@@ -589,27 +615,25 @@ export default function VideoDashboard({
               <div className="grid grid-cols-2 gap-1.5">
                 {FEATURED_GEMINI_VOICE_OPTIONS.map((v) => (
                   <div key={v.id}
-                    className={`rounded-lg transition-colors border ${
+                    className={`rounded-lg p-2 transition-colors border ${
                       settings.geminiVoice === v.id
                         ? 'bg-blue-600 border-blue-500 text-white'
                         : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600'
                     }`}
                   >
-                    <button
-                      onClick={() => setS('geminiVoice', v.id)}
-                      className="w-full px-2 pt-2 text-left"
-                    >
-                      <div className="font-semibold text-sm">{v.label}</div>
-                      <div className="text-[10px] opacity-60 leading-tight">{v.desc}</div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => playGeminiVoicePreview(v.id)}
-                      className="mt-1 flex w-full items-center justify-center gap-1 border-t border-white/10 px-2 py-1.5 text-[11px] font-semibold text-blue-100/90 transition hover:bg-white/10"
-                    >
-                      <span>{previewingGeminiVoice === v.id ? '■' : '▶'}</span>
-                      <span>{previewingGeminiVoice === v.id ? 'Stop' : 'Preview'}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setS('geminiVoice', v.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="font-semibold text-sm">{v.label}</div>
+                      </button>
+                      <VoicePreviewButton
+                        active={previewingGeminiVoice === v.id}
+                        onClick={() => playGeminiVoicePreview(v.id)}
+                      />
+                    </div>
+                    <div className="mt-1 text-[10px] opacity-60 leading-tight">{v.desc}</div>
                   </div>
                 ))}
               </div>
@@ -661,6 +685,19 @@ export default function VideoDashboard({
                   {GEMINI_TTS_PRESETS[settings.geminiPreset].desc}
                 </p>
               )}
+            </div>
+
+            <div>
+              <SectionLabel>Rychlost — {speedLabel}</SectionLabel>
+              <input
+                type="range" min={65} max={120} step={5}
+                value={Math.round(settings.speed * 100)}
+                onChange={(e) => setS('speed', Number(e.target.value) / 100)}
+                className="w-full accent-orange-500"
+              />
+              <div className="flex justify-between text-[11px] text-gray-600 mt-0.5">
+                <span>0.65× Pomalý</span><span>1.2× Rychlý</span>
+              </div>
             </div>
           </>
         )}
@@ -1707,28 +1744,26 @@ export default function VideoDashboard({
               {GEMINI_TTS_VOICES.map((voice) => (
                 <div
                   key={voice.id}
-                  className={`rounded-xl border transition-colors ${
+                  className={`rounded-xl border p-4 transition-colors ${
                     settings.geminiVoice === voice.id
                       ? 'border-blue-500 bg-blue-700 text-white'
                       : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500'
                   }`}
                 >
-                  <button
-                    type="button"
-                    onClick={() => { setS('geminiVoice', voice.id); setShowGeminiVoiceModal(false); }}
-                    className="w-full px-4 py-3 text-left"
-                  >
-                    <span className="block text-base font-bold leading-tight">{voice.label}</span>
-                    <span className="block mt-0.5 text-[11px] text-gray-400">{voice.desc}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => playGeminiVoicePreview(voice.id)}
-                    className="flex w-full items-center justify-center gap-1 border-t border-white/10 px-4 py-2 text-[12px] font-semibold text-blue-100/90 transition hover:bg-white/10"
-                  >
-                    <span>{previewingGeminiVoice === voice.id ? '■' : '▶'}</span>
-                    <span>{previewingGeminiVoice === voice.id ? 'Stop preview' : 'Play preview'}</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => { setS('geminiVoice', voice.id); setShowGeminiVoiceModal(false); }}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <span className="block text-base font-bold leading-tight">{voice.label}</span>
+                    </button>
+                    <VoicePreviewButton
+                      active={previewingGeminiVoice === voice.id}
+                      onClick={() => playGeminiVoicePreview(voice.id)}
+                    />
+                  </div>
+                  <span className="mt-1 block text-[11px] text-gray-400">{voice.desc}</span>
                 </div>
               ))}
             </div>
