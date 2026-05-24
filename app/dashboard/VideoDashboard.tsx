@@ -422,7 +422,11 @@ export default function VideoDashboard({
           projectId,
           videoId,
           segments: segs,
-          settings: { imageSource: settings.imageSource, orientation: settings.orientation },
+          settings: {
+            imageSource: settings.imageSource,
+            orientation: settings.orientation,
+            aiImageReview: settings.aiImageReview,
+          },
         }),
       });
       if (!res.ok || !res.body) throw new Error(await readApiError(res));
@@ -1050,6 +1054,22 @@ export default function VideoDashboard({
               </button>
             ))}
           </div>
+          {settings.imageSource !== 'upload' && (
+            <label className="mt-3 flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={settings.aiImageReview}
+                onChange={(event) => setS('aiImageReview', event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-teal-500"
+              />
+              <span>
+                <span className="block text-xs font-bold text-gray-200">AI Image Review</span>
+                <span className="mt-0.5 block text-[11px] leading-4 text-gray-500">
+                  Gemini QA zkontroluje obrázky před schválením.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
       </div>
 

@@ -25,7 +25,7 @@ const MAX_REVIEW_ATTEMPTS = 3;
 export async function POST(req: Request) {
   const { segments, settings, projectId, videoId } = (await req.json()) as {
     segments: SegmentData[];
-    settings: Pick<VideoSettings, 'imageSource' | 'orientation'>;
+    settings: Pick<VideoSettings, 'imageSource' | 'orientation'> & Partial<Pick<VideoSettings, 'aiImageReview'>>;
     projectId?: string;
     videoId?: string;
   };
@@ -82,6 +82,7 @@ export async function POST(req: Request) {
         const costLines: CostLine[] = [];
         const usage = { serperQueries: 0, imagenImages: 0, generatedImages: 0, googleImageSelections: 0, imageReviews: 0 };
         const source = settings.imageSource as Exclude<ImageSource, 'upload'>;
+        const aiImageReview = settings.aiImageReview !== false;
 
         // ── Step 1: Gemini generates search queries / image prompts ──────────
         send({ type: 'step', message: 'Gemini připravuje dotazy pro obrázky...' });
@@ -175,7 +176,7 @@ export async function POST(req: Request) {
                 }
 
                 // ── AI review via Gemini + Files API ────────────────────────
-                if (localImagePath) {
+                if (localImagePath && aiImageReview) {
                   send({ type: 'reviewing', index: i, attempt: attempt + 1 });
 
                   try {
@@ -207,6 +208,8 @@ export async function POST(req: Request) {
                     console.warn(`[images ${i}] review error (attempt ${attempt + 1}):`, reviewErr);
                     approved = true; // don't block on reviewer failure
                   }
+                } else if (localImagePath) {
+                  approved = true;
                 } else {
                   // No image fetched at all — give up this attempt
                   attempt++;

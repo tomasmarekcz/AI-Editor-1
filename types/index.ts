@@ -54,6 +54,7 @@ export interface VideoSettings {
 
   orientation: Orientation;
   imageSource: ImageSource;
+  aiImageReview: boolean;
   subtitle: SubtitleSettings;
   enableEffects: boolean;
   /** 'auto' = GPT decides (max 6s, paced); number = target seconds per segment */

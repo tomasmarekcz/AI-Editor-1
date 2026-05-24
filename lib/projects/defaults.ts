@@ -28,6 +28,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   elevenLabsCustomVoiceId: '',
   orientation: 'vertical',
   imageSource: 'google',
+  aiImageReview: true,
   subtitle: DEFAULT_SUBTITLE_SETTINGS,
   enableEffects: false,
   segmentDuration: 'auto',

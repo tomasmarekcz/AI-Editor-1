@@ -124,6 +124,7 @@ export async function runVideoPipeline({
   await logPipeline('start', 'Pipeline started.', {
     segments: segments.length,
     imageSource: settings.imageSource,
+    aiImageReview: settings.aiImageReview,
     ttsProvider: settings.ttsProvider,
     openaiVoice: settings.voice,
     openaiPreset: settings.voicePreset,
@@ -294,9 +295,11 @@ export async function runVideoPipeline({
 
   if (settings.imageSource !== 'upload' && !imagesAlreadyReady) {
     const imageSource = settings.imageSource as Exclude<ImageSource, 'upload'>;
+    const aiImageReview = settings.aiImageReview !== false;
     await logPipeline('images_start', 'Starting image generation/search.', {
       segments: segments.length,
       imageSource,
+      aiImageReview,
     });
     await supabase
       .from('videos')
@@ -402,6 +405,11 @@ export async function runVideoPipeline({
 
               if (!localImagePath) {
                 attempt += 1;
+                continue;
+              }
+
+              if (!aiImageReview) {
+                approved = true;
                 continue;
               }
 
