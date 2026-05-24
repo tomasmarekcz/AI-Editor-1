@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { BackgroundVideoWidget } from './dashboard/BackgroundVideoWidget';
 import './globals.css';
 
 const GOOGLE_FONTS =
@@ -21,7 +22,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href={GOOGLE_FONTS} rel="stylesheet" />
       </head>
-      <body className="bg-gray-950 text-white min-h-screen antialiased">{children}</body>
+      <body className="bg-gray-950 text-white min-h-screen antialiased">
+        {children}
+        <BackgroundVideoWidget />
+      </body>
     </html>
   );
 }

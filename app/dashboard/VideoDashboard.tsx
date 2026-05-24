@@ -13,6 +13,12 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_SUBTITLE_SETTINGS, DEFAULT_VIDEO_SETTINGS, mergeVideoSettings } from '@/lib/projects/defaults';
 import { estimateVideoCost, formatUsd, type CostEstimate, type CostLine } from '@/lib/pricing';
+import {
+  setBackgroundVideoJobMinimized,
+  setBackgroundVideoJobPhase,
+  startBackgroundImageJob,
+  useBackgroundVideoJobs,
+} from './backgroundVideoJobs';
 import type {
   TTSVoice, TTSProvider, VideoSettings, SegmentData, SubtitleFont, SubtitleSettings,
   VoicePreset, GeminiTTSPreset, GeminiTTSVoice, VideoEffect, ImageGenMode,
@@ -213,6 +219,7 @@ export default function VideoDashboard({
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const backgroundJobs = useBackgroundVideoJobs();
 
   const setS = <K extends keyof VideoSettings>(k: K, v: VideoSettings[K]) =>
     setSettings((s) => ({ ...s, [k]: v }));
@@ -249,6 +256,29 @@ export default function VideoDashboard({
   }, [previewingGeminiVoice]);
 
   const isBusy = step === 'segmenting' || step === 'queued' || step === 'rendering' || step === 'generating-images';
+
+  useEffect(() => {
+    if (!activeVideoId) return;
+    const job = backgroundJobs.find((item) => item.videoId === activeVideoId);
+    if (!job || job.minimized) return;
+
+    setStatusMsg(job.status);
+    setSegments(job.segments as SegmentState[]);
+    if (job.phase === 'generating-images' || job.phase === 'reviewing-images') {
+      setStep('generating-images');
+    } else if (job.phase === 'awaiting-approval') {
+      setStep('awaiting-review');
+    } else if (job.phase === 'queued') {
+      setStep('queued');
+    } else if (job.phase === 'rendering') {
+      setStep('rendering');
+    } else if (job.phase === 'ready') {
+      setStep('done');
+    } else if (job.phase === 'error') {
+      setStep('error');
+      setError(job.error ?? 'Background video job failed.');
+    }
+  }, [activeVideoId, backgroundJobs]);
 
   useEffect(() => {
     if (resumeVideo) return;
@@ -409,84 +439,30 @@ export default function VideoDashboard({
     setEditingPrompts({});
     setRegeneratingIds(new Set());
 
-    try {
-      setSegments(segs.map((seg) => (
-        seg.localImagePath || (seg as SegmentState).uploadPreviewUrl
-          ? seg
-          : { ...seg, reviewing: true }
-      )));
+    setSegments(segs.map((seg) => (
+      seg.localImagePath || (seg as SegmentState).uploadPreviewUrl
+        ? seg
+        : { ...seg, reviewing: true }
+    )));
 
-      const res = await fetch('/api/images', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId,
-          videoId,
-          segments: segs,
-          settings: {
-            imageSource: settings.imageSource,
-            orientation: settings.orientation,
-            aiImageReview: settings.aiImageReview,
-          },
-        }),
-      });
-      if (!res.ok || !res.body) throw new Error(await readApiError(res));
+    const started = startBackgroundImageJob({
+      videoId,
+      projectId,
+      projectName,
+      title: script.trim().slice(0, 70) || 'Untitled video',
+      segments: segs,
+      settings: {
+        imageSource: settings.imageSource,
+        orientation: settings.orientation,
+        aiImageReview: settings.aiImageReview,
+      },
+    });
 
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n'); buf = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const ev = JSON.parse(line.slice(6)) as Record<string, any>;
-            if (ev.type === 'step') {
-              setStatusMsg(ev.message);
-            } else if (ev.type === 'reviewing') {
-              setSegments((p) => p.map((s, i) =>
-                i === ev.index ? { ...s, reviewing: true } : s,
-              ));
-            } else if (ev.type === 'image_ready') {
-              setSegments((p) => p.map((s, i) =>
-                i === ev.index
-                  ? { ...s, localImagePath: ev.imageUrl, imagePrompt: ev.prompt, imageGenMode: ev.mode, imageFallbackReason: ev.fallbackReason as string | undefined, reviewing: false, attempts: ev.attempts as number | undefined }
-                  : s,
-              ));
-            } else if (ev.type === 'image_failed') {
-              setSegments((p) => p.map((s, i) =>
-                i === ev.index
-                  ? { ...s, imagePrompt: ev.prompt, imageGenMode: ev.mode, imageError: ev.error as string | undefined, reviewing: false }
-                  : s,
-              ));
-            } else if (ev.type === 'done') {
-              const serverSegs = ev.segments as SegmentData[];
-              // Merge server data with client-side error messages from image_failed events
-              setSegments((prev) => serverSegs.map((s: SegmentData, i: number) => ({
-                ...s,
-                uploadPreviewUrl: prev[i]?.uploadPreviewUrl,
-                imageError: s.localImagePath ? undefined : prev[i]?.imageError,
-                imageFallbackReason: s.imageFallbackReason ?? prev[i]?.imageFallbackReason,
-              })));
-              setStep('awaiting-review');
-            } else if (ev.type === 'error') {
-              throw new Error(ev.message);
-            }
-          } catch (pe) {
-            if (pe instanceof Error && !pe.message.includes('JSON')) throw pe;
-          }
-        }
-      }
-    } catch (err) {
+    if (!started.ok) {
       setStep('error');
-      setError(err instanceof Error ? err.message : String(err));
+      setError(started.error);
     }
-  }, [activeVideoId, projectId, settings]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeVideoId, projectId, projectName, script, settings]);
 
   // ── Upload ────────────────────────────────────────────────────────────────
   const handleUpload = useCallback(async (segId: string, file: File, segmentIndex: number) => {
@@ -575,6 +551,9 @@ export default function VideoDashboard({
       setActiveVideoId(data.videoId);
       setStep('queued');
       setStatusMsg(data.message ?? 'Job queued. Worker will pick it up shortly.');
+      setBackgroundVideoJobPhase(data.videoId, 'queued', 'Render zařazen do fronty', {
+        segments: segs,
+      });
 
       if (!hasSavedFirstVideoDefaults) {
         const saved = await saveProjectDefaults(false);
@@ -589,6 +568,23 @@ export default function VideoDashboard({
   const handleReset = () => {
     setStep('idle'); setSegments([]); setVideoUrl(''); setSavedVideoId(''); setActiveVideoId(''); setCostEstimate(null); setError(''); setRenderPct(0); setStatusMsg('');
     setEditingPrompts({}); setRegeneratingIds(new Set());
+  };
+
+  const minimizeActiveVideo = () => {
+    if (!activeVideoId) return;
+    setBackgroundVideoJobMinimized(activeVideoId, true);
+    setStep('idle');
+    setScript('');
+    setSegments([]);
+    setVideoUrl('');
+    setSavedVideoId('');
+    setActiveVideoId('');
+    setCostEstimate(null);
+    setError('');
+    setRenderPct(0);
+    setStatusMsg('');
+    setEditingPrompts({});
+    setRegeneratingIds(new Set());
   };
 
   // ── Voice panel ────────────────────────────────────────────────────────────
@@ -1272,7 +1268,17 @@ export default function VideoDashboard({
     return (
       <main className="min-h-screen bg-gray-950 py-10 px-4">
         <div className="max-w-3xl mx-auto space-y-5">
-          <h2 className="text-xl font-bold">Připravuji obrázky</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold">Připravuji obrázky</h2>
+            <button
+              type="button"
+              onClick={minimizeActiveVideo}
+              disabled={!activeVideoId}
+              className="rounded-lg border border-gray-700 px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-gray-300 transition hover:border-cyan-400 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Minimalizovat
+            </button>
+          </div>
           <div className="flex items-start gap-3 bg-gray-900 border border-gray-800 rounded-xl p-4">
             <span className="mt-0.5 w-4 h-4 border-2 border-teal-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
             <div>
