@@ -29,6 +29,7 @@ import {
   updateProjectDefaultsTool,
   type AutomationToolContext,
 } from '@/lib/automation/videoTools';
+import type { AgentScope } from '@/lib/automation/agentScopes';
 
 type JsonSchema = {
   type: 'object';
@@ -39,6 +40,7 @@ type JsonSchema = {
 
 export type McpAutomationTool = AutomationToolDefinition & {
   inputSchema: JsonSchema;
+  requiredScopes?: AgentScope[];
 };
 
 export type McpAutomationCall = {
@@ -227,11 +229,52 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   deleteVideo: (ctx, args) => deleteVideoTool(ctx, args as Parameters<typeof deleteVideoTool>[1]),
 };
 
+export const MCP_TOOL_REQUIRED_SCOPES: Record<string, AgentScope[]> = {
+  listProjects: ['projects:read'],
+  getProject: ['projects:read'],
+  updateProjectDefaults: ['projects:update'],
+  brainstormTopics: ['projects:read', 'topics:brainstorm'],
+  selectTopic: ['topics:brainstorm'],
+  generateScript: ['projects:read', 'scripts:generate'],
+  segmentScript: ['scripts:generate'],
+  createVideoRecord: ['projects:read', 'videos:create'],
+  createVideoFromPrompt: ['projects:read', 'topics:brainstorm', 'scripts:generate', 'videos:create', 'videos:render'],
+  createVideoFromScript: ['projects:read', 'scripts:generate', 'videos:create', 'videos:render'],
+  queueRender: ['projects:read', 'videos:render'],
+  retryRender: ['videos:render'],
+  listVideos: ['videos:read'],
+  getVideo: ['videos:read'],
+  getVideoStatus: ['videos:read'],
+  listVideoAssets: ['assets:read'],
+  listWorkerLogs: ['logs:read'],
+  generateCaption: ['captions:generate'],
+  setThumbnailFromAsset: ['videos:edit', 'assets:read'],
+  saveVideoEdit: ['videos:edit'],
+  applyVideoPatch: ['videos:edit'],
+  regenerateSceneImage: ['videos:edit'],
+  scheduleYouTubePublish: ['publishing:schedule'],
+  listScheduledPosts: ['publishing:read'],
+  cancelScheduledPost: ['publishing:cancel'],
+  deleteVideo: ['videos:delete'],
+};
+
+export function requiredScopesForMcpAutomationTool(name: string): AgentScope[] {
+  return MCP_TOOL_REQUIRED_SCOPES[name] ?? [];
+}
+
 export function listMcpAutomationTools(): McpAutomationTool[] {
   return VIDEO_AUTOMATION_TOOLS.map((tool) => ({
     ...tool,
     inputSchema: MCP_AUTOMATION_TOOL_INPUT_SCHEMAS[tool.name] ?? anyObjectSchema(),
+    requiredScopes: requiredScopesForMcpAutomationTool(tool.name),
   }));
+}
+
+export function listMcpAutomationToolsForScopes(scopes: string[]): McpAutomationTool[] {
+  const owned = new Set(scopes);
+  return listMcpAutomationTools().filter((tool) => (
+    requiredScopesForMcpAutomationTool(tool.name).every((scope) => owned.has(scope))
+  ));
 }
 
 export function getMcpAutomationTool(name: string): McpAutomationTool | null {
@@ -253,4 +296,3 @@ export async function callMcpAutomationTool(
 export function listMcpAutomationToolNames() {
   return Object.keys(TOOL_HANDLERS);
 }
-

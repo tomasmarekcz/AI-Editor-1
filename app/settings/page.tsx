@@ -1,7 +1,9 @@
 import { AppSidebar } from '@/app/components/layout/AppSidebar';
+import type { AgentApiKeyPublic } from '@/lib/automation/agentKeys';
 import { requireAccountPage } from '@/lib/accounts';
 import { MembersPanel, type AccountInviteView, type AccountMemberView } from './MembersPanel';
 import { YouTubeIntegrationPanel, type IntegrationProjectView, type YouTubeConnectionView } from './YouTubeIntegrationPanel';
+import { AgentKeysPanel, type AgentProjectView } from './AgentKeysPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +22,7 @@ export default async function SettingsPage() {
     .eq('id', user.id)
     .maybeSingle<Profile>();
 
-  const [{ data: members }, { data: invites }, { data: projects }, { data: youtubeConnections }] = await Promise.all([
+  const [{ data: members }, { data: invites }, { data: projects }, { data: youtubeConnections }, { data: agentKeys }] = await Promise.all([
     supabase
       .from('account_members')
       .select('id,email,role,created_at,joined_at,user_id')
@@ -45,6 +47,14 @@ export default async function SettingsPage() {
       .eq('account_id', account.id)
       .eq('platform', 'youtube')
       .returns<YouTubeConnectionView[]>(),
+    account.role === 'owner'
+      ? supabase
+          .from('agent_api_keys')
+          .select('id,account_id,created_by,name,token_prefix,status,scopes,allowed_project_ids,expires_at,last_used_at,last_used_ip,last_used_user_agent,revoked_at,revoked_by,created_at,updated_at')
+          .eq('account_id', account.id)
+          .order('created_at', { ascending: false })
+          .returns<AgentApiKeyPublic[]>()
+      : Promise.resolve({ data: [] }),
   ]);
 
   return (
@@ -75,6 +85,11 @@ export default async function SettingsPage() {
             isOwner={account.role === 'owner'}
             members={(members ?? []) as AccountMemberView[]}
             invites={(invites ?? []) as AccountInviteView[]}
+          />
+          <AgentKeysPanel
+            isOwner={account.role === 'owner'}
+            projects={(projects ?? []) as AgentProjectView[]}
+            agentKeys={(agentKeys ?? []) as AgentApiKeyPublic[]}
           />
           <YouTubeIntegrationPanel
             isOwner={account.role === 'owner'}

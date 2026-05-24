@@ -38,6 +38,9 @@ export type AutomationToolContext = {
   supabase: SupabaseClient;
   userId: string;
   accountId: string;
+  agentApiKeyId?: string;
+  agentScopes?: string[];
+  allowedProjectIds?: string[] | null;
 };
 
 export type ToolResult<T> = T & {
@@ -61,6 +64,10 @@ type VideoRow = Pick<
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function restrictedProjectIds(ctx: AutomationToolContext) {
+  return ctx.allowedProjectIds && ctx.allowedProjectIds.length > 0 ? ctx.allowedProjectIds : null;
 }
 
 function cleanTitle(script: string, fallback = 'Untitled video') {
@@ -140,12 +147,16 @@ async function updateActualCost(ctx: AutomationToolContext, videoId: string) {
 }
 
 export async function listProjectsTool(ctx: AutomationToolContext) {
-  const { data, error } = await ctx.supabase
+  let query = ctx.supabase
     .from('projects')
     .select('*')
     .eq('account_id', ctx.accountId)
     .order('updated_at', { ascending: false });
 
+  const projectIds = restrictedProjectIds(ctx);
+  if (projectIds) query = query.in('id', projectIds);
+
+  const { data, error } = await query;
   if (error) throw error;
   return { ok: true, projects: (data ?? []) as Project[] };
 }
@@ -480,6 +491,8 @@ export async function listVideosTool(
     .limit(Math.max(1, Math.min(100, input.limit ?? 30)));
 
   if (input.projectId) query = query.eq('project_id', input.projectId);
+  const projectIds = restrictedProjectIds(ctx);
+  if (!input.projectId && projectIds) query = query.in('project_id', projectIds);
   if (input.status) query = query.eq('status', input.status);
 
   const { data, error } = await query;
@@ -944,6 +957,8 @@ export async function listScheduledPostsTool(
     .limit(Math.max(1, Math.min(100, input.limit ?? 30)));
 
   if (input.projectId) query = query.eq('project_id', input.projectId);
+  const projectIds = restrictedProjectIds(ctx);
+  if (!input.projectId && projectIds) query = query.in('project_id', projectIds);
   if (input.videoId) query = query.eq('video_id', input.videoId);
   if (input.status) query = query.eq('status', input.status);
 
