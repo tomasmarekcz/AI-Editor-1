@@ -40,13 +40,19 @@ const MAX_BACKGROUND_VIDEO_JOBS = 5;
 const listeners = new Set<() => void>();
 const jobs = new Map<string, BackgroundVideoJob>();
 const runningImageJobs = new Set<string>();
+let cachedSnapshot: BackgroundVideoJob[] = [];
+
+function rebuildSnapshot() {
+  cachedSnapshot = [...jobs.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
 
 function emit() {
+  rebuildSnapshot();
   for (const listener of listeners) listener();
 }
 
 function snapshot() {
-  return [...jobs.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  return cachedSnapshot;
 }
 
 function subscribe(listener: () => void) {
@@ -79,7 +85,7 @@ function initialReviewSegments(segments: SegmentData[]) {
 }
 
 export function useBackgroundVideoJobs() {
-  return useSyncExternalStore(subscribe, snapshot, () => []);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 export function getBackgroundVideoJob(videoId: string) {
