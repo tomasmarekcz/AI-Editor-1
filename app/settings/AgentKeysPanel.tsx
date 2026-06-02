@@ -48,8 +48,42 @@ export function AgentKeysPanel({ isOwner, projects, agentKeys: initialAgentKeys 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [newToken, setNewToken] = useState('');
+  const [showConnectGuide, setShowConnectGuide] = useState(false);
 
   const activeKeys = useMemo(() => agentKeys.filter((key) => key.status === 'active'), [agentKeys]);
+  const agentBaseUrl = typeof window === 'undefined' ? 'https://your-ai-video-editor-domain.com' : window.location.origin;
+  const connectInstructions = `Connect an AI agent to AI Video Editor
+
+Use your Agent API key from this settings page. Keep it private.
+
+Base server:
+${agentBaseUrl}
+
+Authentication:
+Send this header with every request:
+Authorization: Bearer YOUR_AGENT_API_KEY
+
+Step 1: List the tools the agent can use
+GET ${agentBaseUrl}/api/agent/tools
+
+Example:
+curl -H "Authorization: Bearer YOUR_AGENT_API_KEY" \\
+  ${agentBaseUrl}/api/agent/tools
+
+Step 2: Call a tool
+POST ${agentBaseUrl}/api/agent/call
+
+Example:
+curl -X POST ${agentBaseUrl}/api/agent/call \\
+  -H "Authorization: Bearer YOUR_AGENT_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"listProjects","arguments":{}}'
+
+How to use this with Claude
+Paste these instructions into Claude and give it your Agent API key. Tell Claude to use the server above, list the available tools first, and then call tools through /api/agent/call.
+
+Important note
+This is an HTTP agent API. If your Claude setup requires a native MCP server, use a small MCP bridge that forwards tool listing to /api/agent/tools and tool calls to /api/agent/call.`;
 
   function toggleScope(scope: AgentScope) {
     setScopes((current) => (
@@ -133,11 +167,25 @@ export function AgentKeysPanel({ isOwner, projects, agentKeys: initialAgentKeys 
     setMessage('Token copied.');
   }
 
+  async function copyConnectInstructions() {
+    await navigator.clipboard.writeText(connectInstructions);
+    setMessage('Connection instructions copied.');
+  }
+
   return (
     <section className="mt-6 rounded-lg border border-gray-800 bg-gray-900/70 p-5">
-      <div>
-        <p className="text-xs uppercase tracking-[0.18em] text-gray-500">AI Agents</p>
-        <h2 className="mt-1 text-2xl font-black tracking-normal">Agent access keys</h2>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-[0.18em] text-gray-500">AI Agents</p>
+          <h2 className="mt-1 text-2xl font-black tracking-normal">Agent access keys</h2>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowConnectGuide(true)}
+          className="rounded-lg border border-cyan-900 px-3 py-2 text-xs font-bold text-cyan-100 transition hover:border-cyan-400 hover:text-white"
+        >
+          How to connect your agent
+        </button>
       </div>
 
       {!isOwner ? (
@@ -276,6 +324,66 @@ export function AgentKeysPanel({ isOwner, projects, agentKeys: initialAgentKeys 
           ))
         )}
       </div>
+
+      {showConnectGuide && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="agent-connect-guide-title"
+        >
+          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-950 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-800 px-5 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-cyan-300">Agent setup</p>
+                <h3 id="agent-connect-guide-title" className="mt-1 text-xl font-black text-white">
+                  How to connect your agent
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConnectGuide(false)}
+                aria-label="Close"
+                className="rounded-lg border border-gray-700 px-3 py-1 text-lg leading-none text-gray-300 transition hover:border-gray-400 hover:text-white"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-5 py-4">
+              <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+                <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-gray-100">
+                    {connectInstructions}
+                  </pre>
+                </div>
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+                    <p className="text-sm font-bold text-white">Before you start</p>
+                    <p className="mt-2 text-sm text-gray-400">
+                      Create an active Agent API key, copy it once, and paste it into your AI agent when prompted.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={copyConnectInstructions}
+                    className="w-full rounded-lg bg-cyan-400 px-4 py-3 text-sm font-black text-gray-950 transition hover:bg-cyan-300"
+                  >
+                    Copy instructions
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowConnectGuide(false)}
+                    className="w-full rounded-lg border border-gray-700 px-4 py-3 text-sm font-bold text-gray-200 transition hover:border-gray-400 hover:text-white"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
