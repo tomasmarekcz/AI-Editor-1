@@ -757,6 +757,7 @@ export async function regenerateSceneImageTool(
     segment_id: segment.id,
     segment_index: input.segmentIndex,
     storage_bucket: VIDEO_ASSETS_BUCKET,
+    storage_provider: imageAsset.storageProvider,
     storage_path: imageAsset.storagePath,
     mime_type: imageAsset.mimeType,
     size_bytes: imageAsset.sizeBytes,

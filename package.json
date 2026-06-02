@@ -9,7 +9,9 @@
     "worker:dev": "tsx worker/server.ts",
     "worker:start": "tsx worker/server.ts",
     "storage:migrate:dry-run": "tsx scripts/migrateSupabaseStorageToR2.ts",
-    "storage:migrate": "tsx scripts/migrateSupabaseStorageToR2.ts --execute"
+    "storage:migrate": "tsx scripts/migrateSupabaseStorageToR2.ts --execute",
+    "storage:cleanup:dry-run": "tsx scripts/cleanupSupabaseStorageObjects.ts",
+    "storage:cleanup": "tsx scripts/cleanupSupabaseStorageObjects.ts --execute"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1047.0",

@@ -91,14 +91,24 @@ type R2Config = {
   secretAccessKey: string;
 };
 
+export type StorageProvider = 'supabase' | 'r2';
+
 let r2Client: S3Client | null = null;
 
 function storageProvider() {
   return (process.env.STORAGE_PROVIDER ?? 'supabase').toLowerCase();
 }
 
+export function currentStorageProvider(): StorageProvider {
+  return isR2Selected() ? 'r2' : 'supabase';
+}
+
 function fallbackProvider() {
   return (process.env.STORAGE_FALLBACK_PROVIDER ?? '').toLowerCase();
+}
+
+function isR2Selected() {
+  return storageProvider() === 'r2';
 }
 
 function getR2Config(): R2Config | null {
@@ -134,11 +144,15 @@ function getR2Client() {
 }
 
 function useR2Primary() {
-  return storageProvider() === 'r2' && !!getR2Config();
+  return isR2Selected() && !!getR2Config();
 }
 
 function useSupabaseFallback() {
-  return fallbackProvider() === 'supabase' || storageProvider() !== 'r2';
+  return fallbackProvider() === 'supabase' || !isR2Selected();
+}
+
+function shouldBlockSupabaseFallback() {
+  return isR2Selected() && fallbackProvider() !== 'supabase';
 }
 
 async function r2AssetExists(storagePath: string) {
@@ -305,7 +319,11 @@ export async function uploadBufferAsset({
   contentType: string;
 }) {
   const storagePath = `${storageBasePath(userId, projectId, videoId)}/${folder}/${filename}`;
-  if (useR2Primary()) {
+  const provider = currentStorageProvider();
+  if (isR2Selected()) {
+    if (!useR2Primary()) {
+      throw new Error('STORAGE_PROVIDER=r2 is selected, but R2 env is incomplete. Refusing to upload to Supabase fallback.');
+    }
     await withRetry(
       () => uploadBufferAssetToR2(storagePath, buffer, contentType),
       `r2 upload ${storagePath}`,
@@ -327,7 +345,7 @@ export async function uploadBufferAsset({
     if (error) throw error;
   }
 
-  return { storagePath, sizeBytes: buffer.byteLength, mimeType: contentType };
+  return { storagePath, sizeBytes: buffer.byteLength, mimeType: contentType, storageProvider: provider };
 }
 
 export async function uploadLocalAsset({
@@ -378,10 +396,14 @@ export async function createSignedUrl(
 ) {
   if (!storagePath) return null;
 
-  if (useR2Primary()) {
+  if (isR2Selected()) {
+    if (!useR2Primary()) {
+      console.warn(`[storage:r2] signed-url ${storagePath} skipped because R2 env is incomplete.`);
+      return null;
+    }
     const signedUrl = await createR2SignedUrl(storagePath, expiresIn);
     if (signedUrl) return signedUrl;
-    if (!useSupabaseFallback()) return null;
+    if (shouldBlockSupabaseFallback()) return null;
   }
 
   const admin = createStorageAdminClient();
@@ -418,10 +440,14 @@ export async function createSignedUrl(
 export async function downloadAssetBlob(supabase: SupabaseClient, storagePath: string | null) {
   if (!storagePath) return null;
 
-  if (useR2Primary()) {
+  if (isR2Selected()) {
+    if (!useR2Primary()) {
+      console.warn(`[storage:r2] download ${storagePath} skipped because R2 env is incomplete.`);
+      return null;
+    }
     const r2Blob = await downloadR2AssetBlob(storagePath);
     if (r2Blob) return r2Blob;
-    if (!useSupabaseFallback()) return null;
+    if (shouldBlockSupabaseFallback()) return null;
   }
 
   const primary = await supabase.storage.from(VIDEO_ASSETS_BUCKET).download(storagePath);
@@ -497,7 +523,11 @@ export async function deleteVideoStorageAssets({
   if (useR2Primary()) {
     for (const key of await listR2Prefix(prefix)) paths.add(key);
     await deleteR2Assets([...paths]);
-    if (!useSupabaseFallback()) return { deletedPaths: paths.size, prefix };
+    if (shouldBlockSupabaseFallback()) return { deletedPaths: paths.size, prefix };
+  }
+
+  if (shouldBlockSupabaseFallback()) {
+    return { deletedPaths: paths.size, prefix };
   }
 
   const admin = createStorageAdminClient();

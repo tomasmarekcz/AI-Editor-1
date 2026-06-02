@@ -97,6 +97,7 @@ export async function POST(req: Request) {
             segment_id: segmentId,
             segment_index: segmentIndex,
             storage_bucket: VIDEO_ASSETS_BUCKET,
+            storage_provider: imageAsset.storageProvider,
             storage_path: imageAsset.storagePath,
             mime_type: imageAsset.mimeType,
             size_bytes: imageAsset.sizeBytes,

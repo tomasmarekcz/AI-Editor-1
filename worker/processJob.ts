@@ -13,6 +13,10 @@ function workerId() {
   return process.env.WORKER_ID ?? `worker-${process.pid}`;
 }
 
+function shouldLogEmptyPolls() {
+  return process.env.WORKER_CLAIM_DEBUG === 'true';
+}
+
 function normalizeVideo(row: Record<string, unknown>) {
   return {
     id: String(row.id),
@@ -118,13 +122,15 @@ export async function claimNextVideoJob() {
   const supabase = createSupabaseAdminClient();
   if (!supabase) throw new Error('SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
 
-  await logWorkerEvent({
-    supabase,
-    source: 'worker-claim',
-    event: 'claim_next_attempt',
-    message: 'Attempting to claim next queued video job.',
-    metadata: { workerId: workerId() },
-  });
+  if (shouldLogEmptyPolls()) {
+    await logWorkerEvent({
+      supabase,
+      source: 'worker-claim',
+      event: 'claim_next_attempt',
+      message: 'Attempting to claim next queued video job.',
+      metadata: { workerId: workerId() },
+    });
+  }
 
   const { data, error } = await supabase.rpc('claim_next_video_job', {
     p_worker_id: workerId(),
@@ -142,20 +148,22 @@ export async function claimNextVideoJob() {
     throw error;
   }
   const row = getRpcRow(data);
-  await logWorkerEvent({
-    supabase,
-    videoId: row?.id ? String(row.id) : null,
-    accountId: row?.account_id ? String(row.account_id) : null,
-    projectId: row?.project_id ? String(row.project_id) : null,
-    source: 'worker-claim',
-    event: row ? 'claim_next_claimed' : 'claim_next_empty',
-    message: row ? 'Next queued job claimed.' : 'No queued jobs available.',
-    metadata: {
-      workerId: workerId(),
-      rpcDataShape: Array.isArray(data) ? 'array' : typeof data,
-      rpcRows: Array.isArray(data) ? data.length : data ? 1 : 0,
-    },
-  });
+  if (row || shouldLogEmptyPolls()) {
+    await logWorkerEvent({
+      supabase,
+      videoId: row?.id ? String(row.id) : null,
+      accountId: row?.account_id ? String(row.account_id) : null,
+      projectId: row?.project_id ? String(row.project_id) : null,
+      source: 'worker-claim',
+      event: row ? 'claim_next_claimed' : 'claim_next_empty',
+      message: row ? 'Next queued job claimed.' : 'No queued jobs available.',
+      metadata: {
+        workerId: workerId(),
+        rpcDataShape: Array.isArray(data) ? 'array' : typeof data,
+        rpcRows: Array.isArray(data) ? data.length : data ? 1 : 0,
+      },
+    });
+  }
   return row ? { supabase, video: normalizeVideo(row as Record<string, unknown>) } : null;
 }
 
@@ -257,6 +265,7 @@ export async function processClaimedJob(
       },
     });
     await ensureAccountCanRun(supabase, video);
+    let lastLoggedRenderProgress = -1;
     await runVideoPipeline({
       supabase,
       userId: video.userId,
@@ -268,7 +277,11 @@ export async function processClaimedJob(
       originalScript: video.originalScript,
       onEvent: (event) => {
         if (event.type === 'step') console.log(`[worker] ${video.id}: ${event.step}`);
-        if (event.type === 'render_progress') console.log(`[worker] ${video.id}: render ${event.progress}%`);
+        if (event.type === 'render_progress') {
+          if (event.progress < 100 && event.progress < lastLoggedRenderProgress + 10) return;
+          lastLoggedRenderProgress = event.progress;
+          console.log(`[worker] ${video.id}: render ${event.progress}%`);
+        }
         void logWorkerEvent({
           supabase,
           videoId: video.id,

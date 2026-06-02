@@ -213,6 +213,7 @@ Vertical 9:16 short-form video thumbnail, dramatic clickable composition, high c
       video_id: video.id,
       kind: 'thumbnail',
       storage_bucket: VIDEO_ASSETS_BUCKET,
+      storage_provider: uploaded.storageProvider,
       storage_path: uploaded.storagePath,
       mime_type: uploaded.mimeType,
       size_bytes: uploaded.sizeBytes,

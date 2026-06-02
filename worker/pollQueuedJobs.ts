@@ -13,14 +13,18 @@ export function startPollingQueuedJobs() {
   polling = true;
 
   const intervalMs = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 15000);
-  const enabled = process.env.WORKER_POLLING_DISABLED !== 'true';
+  const videoPollingEnabled = process.env.WORKER_POLLING_DISABLED !== 'true';
+  const scheduledPollingEnabled = process.env.WORKER_SCHEDULED_POLLING_DISABLED !== 'true';
 
-  if (!enabled) {
-    console.log('[worker] polling fallback disabled');
+  if (!videoPollingEnabled && !scheduledPollingEnabled) {
+    console.log('[worker] all polling disabled');
     return;
   }
 
-  console.log(`[worker] polling fallback every ${intervalMs}ms`);
+  console.log(`[worker] polling every ${intervalMs}ms`, {
+    videoPollingEnabled,
+    scheduledPollingEnabled,
+  });
 
   const tick = async () => {
     if (running) return;
@@ -29,11 +33,15 @@ export function startPollingQueuedJobs() {
       while (true) {
         let didWork = false;
 
-        const videoResult = await processNextQueuedJob();
-        didWork = !videoResult.ok || videoResult.processed;
+        if (videoPollingEnabled) {
+          const videoResult = await processNextQueuedJob();
+          didWork = !videoResult.ok || videoResult.processed;
+        }
 
-        const postResult = await processNextScheduledPost();
-        didWork = didWork || !postResult.ok || postResult.processed;
+        if (scheduledPollingEnabled) {
+          const postResult = await processNextScheduledPost();
+          didWork = didWork || !postResult.ok || postResult.processed;
+        }
 
         if (!didWork) break;
         await sleep(500);

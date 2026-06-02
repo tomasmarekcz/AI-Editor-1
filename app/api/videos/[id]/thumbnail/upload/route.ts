@@ -65,6 +65,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       video_id: video.id,
       kind: 'thumbnail',
       storage_bucket: VIDEO_ASSETS_BUCKET,
+      storage_provider: uploaded.storageProvider,
       storage_path: uploaded.storagePath,
       mime_type: uploaded.mimeType,
       size_bytes: uploaded.sizeBytes,

@@ -190,6 +190,7 @@ export async function runVideoPipeline({
         segment_id: seg.id,
         segment_index: index,
         storage_bucket: VIDEO_ASSETS_BUCKET,
+        storage_provider: imageAsset.storageProvider,
         storage_path: imageAsset.storagePath,
         mime_type: imageAsset.mimeType,
         size_bytes: imageAsset.sizeBytes,
@@ -595,6 +596,7 @@ export async function runVideoPipeline({
     video_id: videoId,
     kind: 'audio',
     storage_bucket: VIDEO_ASSETS_BUCKET,
+    storage_provider: audioAsset.storageProvider,
     storage_path: audioAsset.storagePath,
     mime_type: audioAsset.mimeType,
     size_bytes: audioAsset.sizeBytes,
@@ -705,6 +707,7 @@ export async function runVideoPipeline({
     video_id: videoId,
     kind: 'subtitles',
     storage_bucket: VIDEO_ASSETS_BUCKET,
+    storage_provider: subtitlesAsset.storageProvider,
     storage_path: subtitlesAsset.storagePath,
     mime_type: subtitlesAsset.mimeType,
     size_bytes: subtitlesAsset.sizeBytes,
@@ -728,7 +731,17 @@ export async function runVideoPipeline({
 
   let videoUrl: string;
   try {
+    let lastPersistedRenderProgress = -1;
+    let lastRenderProgressAt = 0;
     videoUrl = await renderVideo(processed, videoId, settings, audioRelPath, (pct) => {
+      const now = Date.now();
+      const isFinalProgress = pct >= 100;
+      const movedEnough = pct >= lastPersistedRenderProgress + 5;
+      const waitedEnough = now - lastRenderProgressAt >= 5000;
+      if (!isFinalProgress && !movedEnough && !waitedEnough) return;
+
+      lastPersistedRenderProgress = pct;
+      lastRenderProgressAt = now;
       send({ type: 'render_progress', progress: pct });
       void supabase
         .from('videos')
@@ -822,6 +835,7 @@ export async function runVideoPipeline({
         video_id: videoId,
         kind: 'thumbnail',
         storage_bucket: VIDEO_ASSETS_BUCKET,
+        storage_provider: thumbAsset.storageProvider,
         storage_path: thumbAsset.storagePath,
         mime_type: thumbAsset.mimeType,
         size_bytes: thumbAsset.sizeBytes,
@@ -855,6 +869,7 @@ export async function runVideoPipeline({
     video_id: videoId,
     kind: 'final_video',
     storage_bucket: VIDEO_ASSETS_BUCKET,
+    storage_provider: finalAsset.storageProvider,
     storage_path: finalAsset.storagePath,
     mime_type: finalAsset.mimeType,
     size_bytes: finalAsset.sizeBytes,
